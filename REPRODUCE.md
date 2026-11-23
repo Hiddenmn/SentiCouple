@@ -18,7 +18,15 @@ python paper_figures.py --runs runs --output reproduced_figures
 python paper_figures.py --runs runs --output reproduced_figures --supplement
 ```
 
-The benchmark JSON files contain the forecast metrics and inference times used in Tables 4 and 5. `runs/conditional_intensity_effects.json` summarizes the ordering and score-calibration comparisons. `runs/within_polarity_examples.npz` gives the 16 clips plotted in the main paper, with updates averaged across the 35% and 65% visual gaps. The MSP-Face transition counts in `runs/msp_face_refit_paired.json` summarize which forecasts improved after visual fusion before and after refitting.
+The benchmark JSON files contain the forecast metrics and inference times used in Tables 4 and 5. Recompute the primary crossed fit-and-media intervals for the CH-SIMS v2 text-and-vision and three-stream comparisons and for RAVDESS from the grouped loss sums.
+
+```sh
+python primary_comparisons.py --grouped runs/primary_grouped_rps.json
+```
+
+The grouped record contains clip counts and paired loss sums, with the class weights already applied for RAVDESS.
+
+`runs/conditional_intensity_effects.json` summarizes the ordering and score-calibration comparisons. `runs/within_polarity_examples.npz` gives the 16 clips plotted in the main paper, with updates averaged across the 35% and 65% visual gaps. The MSP-Face transition counts in `runs/msp_face_refit_paired.json` summarize which forecasts improved after visual fusion before and after refitting.
 
 ## Recreate inputs and train models
 
@@ -130,7 +138,7 @@ python three_stream_benchmark.py --cohort sims_v2 --output reproduced_sims_v2_th
 python three_stream_benchmark.py --cohort mosei --output reproduced_mosei_three_stream.json
 ```
 
-Add `--profile-upstream "$UCMR_DIR"` to either command to measure the seed 97 models on CUDA. It replays both models with the recorded audio and visual masks before timing the same batch sizes as Table 4.
+Add `--profile-upstream "$UCMR_DIR"` to either command to measure the seed 97 models on CUDA. It replays both models with the recorded audio and visual masks before timing the same batch sizes as Table 4. Add `--categorical-check` to replay the argmax and tuning neutral-offset comparisons from the same fitted runs. RPS and MAE use the probability and intensity forecasts before the neutral decision offset.
 
 To refit UCMR-Net, use the pinned checkout and `benchmark.py --model ucmr-net --head regression --inputs audiovisual --epochs 24 --patience 6 --batch 64 --lr 0.001 --weight-decay 0.0001 --device cuda`. Pass the data and split flags for the corresponding corpus as above. On CH-SIMS v2, match `runs/sims_v2_shared_score_seed<seed>`. On CMU-MOSEI, match `runs/mosei_three_stream_seed<seed>` and use `--eval-groups splits/mosei_eval_videos.txt`. Name the outputs `sims_v2_three_stream_ucmr_net_seed<seed>` or `mosei_three_stream_ucmr_net_seed<seed>` with seeds 97, 17 and 521.
 

@@ -143,12 +143,33 @@ def architecture(runs):
     return summary
 
 
+def grouped_rps(path):
+    """Recalculate the main paired gains from anonymized group totals."""
+    results = {}
+    for name, record in json.loads(path.read_text(encoding='utf-8')).items():
+        counts = np.asarray(record['clip_counts'], dtype=np.int64)
+        totals = np.asarray(record['paired_loss_sums'], dtype=np.float64)
+        if totals.ndim != 2 or totals.shape[1] != counts.size or (counts <= 0).any():
+            raise ValueError(f'Invalid grouped losses for {name}.')
+        tail = .025 / record['family_size']
+        result = dict(metric=record['metric'], reduction=float(totals.sum(axis=1).mean() / counts.sum()),
+                      interval=grouped_seed_video_interval(totals, counts, record['resamples'],
+                                                           quantiles=(tail, 1 - tail)))
+        results[name] = result
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--runs', type=Path, required=True)
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument('--runs', type=Path)
+    inputs.add_argument('--grouped', type=Path, help='Replay primary RPS intervals from grouped losses.')
     args = parser.parse_args()
-    result = dict(ch_sims_v2=ch_sims(args.runs), ravdess=ravdess(args.runs), cremad=cremad(args.runs),
-                  score_calibration=score_calibration(args.runs), architecture=architecture(args.runs))
+    if args.grouped is not None:
+        result = grouped_rps(args.grouped)
+    else:
+        result = dict(ch_sims_v2=ch_sims(args.runs), ravdess=ravdess(args.runs), cremad=cremad(args.runs),
+                      score_calibration=score_calibration(args.runs), architecture=architecture(args.runs))
     print(json.dumps(result, indent=2, allow_nan=False))
 
 

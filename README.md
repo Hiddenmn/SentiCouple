@@ -8,7 +8,7 @@ Qisong Zhou, Shu Zhang, Yi Liu, and Yuting Liu. Southwest Petroleum University.
 
 ## Results
 
-Sharing the signed update reduced ranked probability score by 0.0081 with text, audio and vision on CH-SIMS v2 and by 0.0059 with text and vision. It also reduced class-balanced ranked probability score by 0.0034 on held-out RAVDESS actors. In the matched three-stream comparison on CH-SIMS v2 and CMU-MOSEI, SentiCouple used 85–88% fewer downstream parameters than UCMR-Net and achieved 3.5–4.5 percentage points higher mean macro-F1.
+Sharing the signed update reduced ranked probability score by 0.0081 with text, audio and vision on CH-SIMS v2 and by 0.0059 with text and vision. It also reduced class-balanced ranked probability score by 0.0034 on held-out RAVDESS actors. In matched three-stream comparisons on CH-SIMS v2 and CMU-MOSEI, SentiCouple used 85–88% fewer trainable downstream parameters than UCMR-Net. Applying the same tuning rule to the neutral decision narrows the mean macro-F1 difference.
 
 ## Start here
 
