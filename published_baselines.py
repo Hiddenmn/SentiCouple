@@ -14,7 +14,7 @@ from torch import nn
 from torch.nn import functional as F
 import yaml
 
-from mosei_baselines import MOSEI_BASELINES, build_mosei_baseline
+from mosei_baselines import MOSEI_BASELINES, RATING_TO_MOSEI_SCALE, build_mosei_baseline
 from networks import intensity_anchor, sentiment_shift
 
 
@@ -286,9 +286,11 @@ def build_published(name, upstream, corpus, dimensions, lengths, head, visual_on
     package = 'models' if name in ('lnln', 'tfr-net') else None
     with upstream_imports(path, package):
         if name in MOSEI_BASELINES:
-            if corpus != 'mosei' or head != 'regression' or not visual_only:
-                raise ValueError('The cached-feature adapter uses CMU-MOSEI text and vision with a regression readout.')
-            return build_mosei_baseline(name, path, dimensions, lengths)
+            if corpus not in RATING_TO_MOSEI_SCALE or head != 'regression':
+                raise ValueError('The cached-feature adapters require a known rating scale and a regression readout.')
+            if name == 'api' and not visual_only:
+                raise ValueError('The API adapter uses text and vision.')
+            return build_mosei_baseline(name, path, dimensions, lengths, corpus, visual_only=visual_only)
         template = 'sims' if corpus in ('omg', 'msp-face') else corpus
         if name == 'lnln':
             return LNLNFeatures(path, template, dimensions, lengths, head)

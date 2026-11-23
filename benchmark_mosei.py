@@ -22,10 +22,10 @@ SETTINGS = {
 }
 
 
-def verify_development_split(reference, clips, split, seed):
+def verify_development_split(reference, clips, split, seed, *, inputs='visual'):
     settings = json.loads((reference / 'run.json').read_text(encoding='utf-8'))
     config = settings['config']
-    expected = dict(seed=seed, split='official', mask_seed=1777, split_seed=1729, bins=24, inputs='visual')
+    expected = dict(seed=seed, split='official', mask_seed=1777, split_seed=1729, bins=24, inputs=inputs)
     if any(config.get(key) != value for key, value in expected.items()):
         raise ValueError(f'The reference protocol differs at {reference}.')
     for name in ('fit', 'tune', 'eval'):

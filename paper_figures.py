@@ -48,6 +48,12 @@ def panel(axis, letter, x=0, y=1.045):
               fontweight='bold', fontsize=10, clip_on=False, color='black')
 
 
+def left_of_y_labels(axis):
+    figure = axis.figure
+    bounds = axis.yaxis.get_tightbbox(figure.canvas.get_renderer())
+    return bounds.transformed(figure.transFigure.inverted()).x0
+
+
 def forest_axis(axis, labels, xlabel, limits=None):
     axis.set_axisbelow(True)
     axis.grid(axis='y', color=GRID, linewidth=.45)
@@ -104,7 +110,7 @@ def architecture_flow(axis, visual, visible, audio, audible):
     arrow(axis, [(.444, .790), (.482, .790), (.482, .605), (.513, .605)])
     arrow(axis, [(.444, .500), (.513, .500)])
     arrow(axis, [(.444, .176), (.482, .176), (.482, .395), (.513, .395)])
-    arrow(axis, [(.444, .875), (.695, .875), (.695, .957), (.887, .957), (.887, .919)])
+    arrow(axis, [(.448, .875), (.764, .875)])
     arrow(axis, [(.679, .505), (.701, .505), (.701, .706), (.763, .706)], color=INDIGO)
     axis.plot([.679, .725], [.386, .386], color=MAGENTA, linewidth=.95)
     arrow(axis, [(.725, .386), (.725, .575), (.763, .575)], color=MAGENTA)
@@ -169,22 +175,9 @@ def model_trace(runs):
         audio, audible = packet['audio'], packet['masks'][1, 0]
     figure = plt.figure(figsize=(6.75, 5.70))
     grid = figure.add_gridspec(3, 19, left=.126, right=.972, top=.916, bottom=.181,
-                              height_ratios=(.74, 1.13, 1.63), hspace=.40, wspace=0)
+                              height_ratios=(.74, 1.13, 1.63), hspace=.34, wspace=0)
     frames = figure.add_subplot(grid[0, :])
-    top = filmstrip(frames, data['frames'], data['frame_slots'])
-    frames.text(.073, top + .12, f'“{data["transcript"].item()}”', transform=frames.transAxes,
-                ha='left', va='bottom', fontsize=8.6, color=INK)
-    for number in data['frame_slots'] + 1:
-        frames.text(number - .5, -.032, str(number), ha='center', va='top', fontsize=7.1,
-                    color=SLATE, clip_on=False)
-    hidden = np.flatnonzero(~data['masks'][1])
-    frames.add_patch(Rectangle((hidden[0], -.247), len(hidden), .093, facecolor='#F0D5DF',
-                               edgecolor=MAGENTA, linewidth=.6, clip_on=False))
-    frames.text(hidden.mean() + .5, -.29, VIEWS[1], ha='center', va='top',
-                fontsize=7.25, color=MAGENTA, clip_on=False)
-    panel(frames, 'a', y=top + .105)
-    architecture_flow(figure.add_subplot(grid[1, :]), data['visual'], data['masks'][1], audio, audible)
-
+    architecture = figure.add_subplot(grid[1, :])
     observations, shifts, probabilities, intensity = (figure.add_subplot(grid[2, span]) for span in
                                                        (slice(0, 5), slice(6, 9), slice(10, 14), slice(15, 19)))
     rows = np.arange(len(VIEWS))[::-1]
@@ -228,8 +221,9 @@ def model_trace(runs):
     probabilities.set_xticks([0, .5, 1])
     intensity.set_xlim(min(data['fused_score'].min(), data['anchor_score'].min()) - .05, .02)
     intensity.set_xticks([-.6, -.3, 0])
-    for axis, letter, label in zip((observations, shifts, probabilities, intensity), 'cdef',
-                                   ('CLIP time bin', 'Logit update', 'Class probability', 'Signed intensity'), strict=True):
+    traces = (observations, shifts, probabilities, intensity)
+    for axis, label in zip(traces, ('CLIP time bin', 'Logit update', 'Class probability', 'Signed intensity'),
+                           strict=True):
         axis.set_ylim(-.50, len(rows) - .50)
         axis.set_yticks(rows, VIEWS if axis is observations else [''] * len(rows))
         axis.tick_params(axis='y', length=0, pad=4)
@@ -238,7 +232,6 @@ def model_trace(runs):
         axis.set_xlabel(label, labelpad=3.5)
         for boundary in [.5, 1.5, 2.5]:
             axis.axhline(boundary, color=GRID, linewidth=.55, zorder=0)
-        panel(axis, letter, y=1.045)
 
     probabilities.set_xlabel('Class probability\nAnchor above fusion', labelpad=3.5)
     intensity.set_xlabel(f'Signed intensity\nAudience {float(data["target"]):.3f}'.replace('-', '−'),
@@ -256,6 +249,30 @@ def model_trace(runs):
     shifts.legend(handles=[Patch(facecolor=MAGENTA, label=r'$\delta$'), Patch(facecolor=INDIGO, label=r'$\nu$')],
                   loc='upper center', bbox_to_anchor=(.48, -.34), ncol=2, frameon=False,
                   handletextpad=.36, handlelength=1.0, columnspacing=.8, fontsize=7.5, borderpad=0)
+
+    figure.canvas.draw()
+    label_edge = left_of_y_labels(observations)
+    for axis in (frames, architecture):
+        position = axis.get_position()
+        axis.set_position(Bbox.from_extents(label_edge, position.y0, position.x1, position.y1))
+    for axis, letter in zip(traces, 'cdef', strict=True):
+        position = axis.get_position()
+        label_x = (label_edge - position.x0) / position.width if axis is observations else 0
+        panel(axis, letter, x=label_x)
+
+    top = filmstrip(frames, data['frames'], data['frame_slots'])
+    frames.text(.073, top + .12, f'“{data["transcript"].item()}”', transform=frames.transAxes,
+                ha='left', va='bottom', fontsize=8.6, color=INK)
+    for number in data['frame_slots'] + 1:
+        frames.text(number - .5, -.032, str(number), ha='center', va='top', fontsize=7.1,
+                    color=SLATE, clip_on=False)
+    hidden = np.flatnonzero(~data['masks'][1])
+    frames.add_patch(Rectangle((hidden[0], -.247), len(hidden), .093, facecolor='#F0D5DF',
+                               edgecolor=MAGENTA, linewidth=.6, clip_on=False))
+    frames.text(hidden.mean() + .5, -.29, VIEWS[1], ha='center', va='top',
+                fontsize=7.25, color=MAGENTA, clip_on=False)
+    panel(frames, 'a', y=top + .105)
+    architecture_flow(architecture, data['visual'], data['masks'][1], audio, audible)
     return figure
 
 
@@ -299,7 +316,7 @@ def coupling_evidence(runs):
     crema = report(runs, 'cremad_effects')
     figure = plt.figure(figsize=(6.75, 3.87))
     grid = figure.add_gridspec(2, 2, left=.139, right=.940, bottom=.137, top=.912,
-                              hspace=.18, wspace=.50, width_ratios=(1.12, 1.),
+                              hspace=.11, wspace=.50, width_ratios=(1.12, 1.),
                               height_ratios=(2.19, 1.))
     examples = figure.add_subplot(grid[0, :])
     fits, components = [figure.add_subplot(grid[1, column]) for column in (0, 1)]
@@ -332,12 +349,19 @@ def coupling_evidence(runs):
                                 color=INK, ha='left' if value >= 0 else 'right', va='center', fontsize=6.8)
     forest_axis(components, POLARITY, r'RPS component gain ($10^{-3}$)', limits=(-18, 53))
     components.grid(False, axis='y')
-    statement_predictions(examples, runs)
-    for axis, letter in zip((examples, fits, components), 'abc', strict=True):
-        panel(axis, letter)
     components.legend(handles=[Patch(color=MAGENTA, label='Signed'), Patch(color=INDIGO, label='Neutral')],
                       loc='lower right', bbox_to_anchor=(1., 1.080), ncol=2, frameon=False, fontsize=7.35,
                       handlelength=1, handletextpad=.38, columnspacing=.68, borderpad=0)
+    figure.canvas.draw()
+    label_edge = left_of_y_labels(fits)
+    example_bounds = examples.get_position()
+    data_center = (label_edge + components.get_position().x1) / 2
+    examples.set_position(example_bounds.translated(data_center - (example_bounds.x0 + example_bounds.x1) / 2, 0))
+    statement_predictions(examples, runs)
+    for axis, letter in ((examples, 'a'), (fits, 'b')):
+        position = axis.get_position()
+        panel(axis, letter, x=(label_edge - position.x0) / position.width)
+    panel(components, 'c')
     return figure
 
 
@@ -489,7 +513,9 @@ def plot_gain_transitions(axis, changes):
     scale = .69 / counts.sum()
     colors = (TEAL, MAGENTA)
     labels = ('Lower RPS', 'No RPS gain')
-    left, right = .225, .775
+    left, right = .140, .860
+    left_control = left + .38 * (right - left)
+    right_control = right - .38 * (right - left)
     starts = [[.80, .80 - sizes[0] * scale - .055] for sizes in margins]
     for source in range(len(labels)):
         for target in range(len(labels)):
@@ -497,16 +523,16 @@ def plot_gain_transitions(axis, changes):
             right_top = starts[1][target] - scale * counts[:source, target].sum()
             count = counts[source, target]
             height = count * scale
-            coordinates = [(left, left_top), (.431, left_top), (.569, right_top), (right, right_top),
-                           (right, right_top - height), (.569, right_top - height),
-                           (.431, left_top - height), (left, left_top - height), (left, left_top)]
+            coordinates = [(left, left_top), (left_control, left_top), (right_control, right_top), (right, right_top),
+                           (right, right_top - height), (right_control, right_top - height),
+                           (left_control, left_top - height), (left, left_top - height), (left, left_top)]
             operations = [ArtistPath.MOVETO, ArtistPath.CURVE4, ArtistPath.CURVE4, ArtistPath.CURVE4,
                           ArtistPath.LINETO, ArtistPath.CURVE4, ArtistPath.CURVE4, ArtistPath.CURVE4,
                           ArtistPath.CLOSEPOLY]
             axis.add_patch(PathPatch(ArtistPath(coordinates, operations), facecolor=colors[target],
                                      alpha=.53 if source == target else .25, edgecolor='white', linewidth=.58))
             if count:
-                axis.text(left + .065, left_top - height / 2, f'{count:,}', ha='center', va='center',
+                axis.text(left + .078, left_top - height / 2, f'{count:,}', ha='center', va='center',
                           fontsize=7.2, color=INK)
     for x, dx, name, starts_at, sizes, alignment in (
         (left, -.022, 'Frozen', starts[0], margins[0], 'right'),
@@ -516,8 +542,8 @@ def plot_gain_transitions(axis, changes):
         for start, count, label, color in zip(starts_at, sizes, labels, colors, strict=True):
             height = scale * count
             axis.add_patch(Rectangle((x - .009, start - height), .018, height, facecolor=color, edgecolor='none'))
-            axis.text(x + dx, start - height / 2, f'{label} · {count:,}', ha=alignment, va='center',
-                      color=INK, fontsize=7.3)
+            axis.text(x + dx, start - height / 2, f'{label}\n{count:,}', ha=alignment, va='center',
+                      color=INK, fontsize=7.3, linespacing=1.28)
 
 
 def transfer_evidence(runs):
@@ -527,7 +553,7 @@ def transfer_evidence(runs):
     refit = report(runs, 'msp_face_refit_paired')
     figure = plt.figure(figsize=(6.75, 3.85))
     grid = figure.add_gridspec(2, 2, left=.150, right=.894, bottom=.09, top=.882,
-                              hspace=.53, wspace=.49, height_ratios=(1.17, .95))
+                              hspace=.43, wspace=.49, height_ratios=(1.17, .95))
     overall, target = figure.add_subplot(grid[0, 0]), figure.add_subplot(grid[0, 1])
     switching = figure.add_subplot(grid[1, :])
     for row, source in zip((2, 1, 0), (moud, meld, frozen), strict=True):
@@ -585,7 +611,6 @@ def transfer_evidence(runs):
     means = changes.mean(1)
     np.testing.assert_allclose(means, [x['secondary']['anchor']['reduction'] for x in (frozen, refit)],
                                atol=1e-7)
-    plot_gain_transitions(switching, changes)
     for axis, entries in ((overall, [(SLATE, '-', 'Text anchor'), (TEAL, '-', 'Shared')]),
                           (target, [(TEAL, '-', 'vs. independent'), (INDIGO, '--', 'vs. anchor')])):
         handles = [Line2D([], [], color=color, ls=style, label=label) for color, style, label in entries]
@@ -594,10 +619,14 @@ def transfer_evidence(runs):
     figure.canvas.draw()
     renderer = figure.canvas.get_renderer()
     upper = Bbox.union([axis.get_tightbbox(renderer) for axis in (overall, target)])
+    upper_bounds = upper.transformed(figure.transFigure.inverted())
+    position = switching.get_position()
+    switching.set_position(Bbox.from_extents(upper_bounds.x0, position.y0, upper_bounds.x1, position.y1))
+    plot_gain_transitions(switching, changes)
     flow = Bbox.union([artist.get_window_extent(renderer) for artist in (*switching.texts, *switching.patches)])
     shift = (flow.x0 + flow.x1 - upper.x0 - upper.x1) / (2 * switching.bbox.width)
     switching.set_xlim(shift, 1 + shift)
-    panel(switching, 'c', y=1.01)
+    panel(switching, 'c', y=1.08)
     return figure
 
 
@@ -726,7 +755,16 @@ def main():
         figure = render(args.runs)
         if args.alignment_script:
             log = args.report_directory / f'{name}_alignment.json' if args.report_directory else None
-            require_matplotlib_panel_alignment(figure, json_out=log)
+            mixed_rows = {
+                'model_trace': ('c', 'The two full-width rows align to the observation labels.'),
+                'coupling_evidence': ('a', 'The frame strip centers over the labeled result panels.'),
+                'transfer_evidence': ('c', 'The flow spans both plots and their outer labels.'),
+            }
+            exemptions = []
+            if name in mixed_rows:
+                letter, reason = mixed_rows[name]
+                exemptions.append(dict(panels=[letter], checks=['column'], reason=reason))
+            require_matplotlib_panel_alignment(figure, json_out=log, exemptions=exemptions)
         export(figure, args.output / f'{name}.pdf', align_panels=True)
 
 

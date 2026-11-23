@@ -59,12 +59,16 @@ def namespace_ids(root, prefix):
 def assemble_plate(output, parts):
     """Write a single vector PDF and SVG, with matching print-resolution PNG."""
     directory = parts[0].path.parent
-    width, inset = 485., 5.
-    rows = []
-    y = 3.
+    inset = 5.
+    sources = []
     for part in parts:
         original = ET.parse(part.path.with_suffix('.svg')).getroot()
         _, _, native_width, native_height = map(float, original.attrib['viewBox'].split())
+        sources.append((part, original, native_width, native_height))
+    width = min(485., max(item[2] for item in sources) + 2 * inset)
+    rows = []
+    y = 3.
+    for part, original, native_width, native_height in sources:
         scale = min(1., (width - 2 * inset) / native_width)
         w, h = native_width * scale, native_height * scale
         rows.append((part, original, (width - w) / 2, y, w, h, scale))
@@ -86,7 +90,7 @@ def assemble_plate(output, parts):
             letters = row['letters']
             baseline = top + scale * row['baseline_from_top']
             for column, letter in enumerate(letters):
-                anchor = 10 + (width - 20) * column / len(letters)
+                anchor = inset + (width - 2 * inset) * column / len(letters)
                 label = ET.SubElement(svg, f'{{{SVG}}}text', x=f'{anchor:.5f}', y=f'{baseline:.5f}',
                                       fill='black', attrib={'font-family': 'Arial, sans-serif',
                                                             'font-size': '9', 'font-weight': 'bold'})

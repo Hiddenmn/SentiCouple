@@ -1,4 +1,4 @@
-"""Adapt the released API and UCMR-Net models to the matched MOSEI inputs."""
+"""Adapt the released API and UCMR-Net models to matched cached features."""
 
 import json
 from pathlib import Path
@@ -13,6 +13,7 @@ import yaml
 
 
 MOSEI_BASELINES = ('api', 'ucmr-net')
+RATING_TO_MOSEI_SCALE = {'mosei': 1., 'mosi': 1., 'sims': 3., 'omg': 3.}
 
 
 def masked_mean(features, visible):
@@ -22,7 +23,7 @@ def masked_mean(features, visible):
 class APIForVisualGaps(nn.Module):
     """Reuse API's class prototypes, FiLM and fusion on cached text and vision."""
 
-    def __init__(self, upstream, dimensions, lengths):
+    def __init__(self, upstream, dimensions, lengths, rating_scale):
         super().__init__()
         from trains.singleTask.model.april import APRIL
 
@@ -32,6 +33,7 @@ class APIForVisualGaps(nn.Module):
             'feature_dims': dimensions,
         }))
         self.core = APRIL(args)
+        self.rating_scale = rating_scale
         self.contrastive_weight = args.proto_contrastive_weight
         self.reconstruction_weight = args.personal_recon_weight
         for stream, length, layer in (('text', lengths[0], self.core.proj_l),
@@ -102,11 +104,12 @@ class APIForVisualGaps(nn.Module):
     def forward(self, observed, visible):
         text, text_mask, vision, vision_mask = self.encode(observed, visible)
         repaired = self.repair_vision(text, text_mask, vision, vision_mask)
-        forecast = self.fuse(text, repaired)
+        forecast = self.fuse(text, repaired) / self.rating_scale
         return forecast, forecast.new_zeros(())
 
     def training_objective(self, observed, visible, full, native, intensity):
         core = self.core
+        intensity = intensity * self.rating_scale
         classes = (intensity + 3).round().clamp(0, 6).long()
         text, text_mask, vision, vision_mask = self.encode(observed, visible)
         clean_vision, native_vision = self.project(full[2], native[2], core.proj_v)
@@ -157,7 +160,7 @@ class AbsentAudio(nn.Module):
 class UCMRForVisualGaps(nn.Module):
     """Reuse the author's feature mode, residual gate, losses and distillation."""
 
-    def __init__(self, upstream, dimensions):
+    def __init__(self, upstream, dimensions, rating_scale, visual_only=True):
         super().__init__()
         package = upstream / 'UCMR-Net_code.zip'
         source = str(package / 'UCMR-Net_code' / 'src')
@@ -173,7 +176,9 @@ class UCMRForVisualGaps(nn.Module):
         model_config = config['model'] | {'text_mode': 'features'}
         self.core = UCMRNet(model_config, SimpleNamespace(text_mode='features', text_dim=dimensions[0],
                                                          audio_dim=dimensions[1], visual_dim=dimensions[2]))
-        self.core.audio_encoder = AbsentAudio(model_config['hidden_dim'])
+        if visual_only:
+            self.core.audio_encoder = AbsentAudio(model_config['hidden_dim'])
+        self.rating_scale = rating_scale
         self.loss_config = config['loss']
         self.distillation_weight = config['training']['phases'][0]['distill_weight']
         self.supervised_loss = compute_supervised_loss
@@ -188,13 +193,13 @@ class UCMRForVisualGaps(nn.Module):
                     visual=vision, visual_mask=vision_mask, availability_mask=availability)
 
     def forward(self, observed, visible):
-        forecast = self.core(self.inputs(observed, visible))['regression'].unsqueeze(1)
+        forecast = self.core(self.inputs(observed, visible))['regression'].unsqueeze(1) / self.rating_scale
         return forecast, forecast.new_zeros(())
 
     def training_objective(self, observed, visible, full, native, intensity):
         full_inputs = tuple(values * mask.unsqueeze(-1) for values, mask in zip(full, native, strict=True))
         batch = self.inputs(full_inputs, native)
-        batch['label'] = intensity
+        batch['label'] = intensity * self.rating_scale
         full_output = self.core(batch)
         losses = self.supervised_loss(full_output, batch, self.loss_config)
         masked_output = self.core(self.inputs(observed, visible))
@@ -202,8 +207,10 @@ class UCMRForVisualGaps(nn.Module):
         return losses['total']
 
 
-def build_mosei_baseline(name, upstream, dimensions, lengths):
+def build_mosei_baseline(name, upstream, dimensions, lengths, corpus='mosei', visual_only=True):
     path = Path(upstream)
+    # These models use seven ordinal bins on the MOSEI [-3, 3] rating scale.
+    rating_scale = RATING_TO_MOSEI_SCALE[corpus]
     if name == 'api':
-        return APIForVisualGaps(path, dimensions, lengths)
-    return UCMRForVisualGaps(path, dimensions)
+        return APIForVisualGaps(path, dimensions, lengths, rating_scale)
+    return UCMRForVisualGaps(path, dimensions, rating_scale, visual_only=visual_only)

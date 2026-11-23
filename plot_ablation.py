@@ -736,7 +736,7 @@ def plot_conditional_intensity(root, output, alignment_script, layout_report):
          [('conditional_shared', 'Shared tilt'), ('conditional_independent', 'Independent tilt')]),
     ]
     figure, axes = plt.subplots(1, 2, figsize=(6.55, 2.38))
-    figure.subplots_adjust(left=.17, right=.975, bottom=.232, top=.715, wspace=.45)
+    figure.subplots_adjust(left=.17, right=.975, bottom=.232, top=.754, wspace=.45)
     for axis, (title, family, metric, comparisons) in zip(axes, panels):
         rows = np.linspace(2.0, 0.0, len(comparisons))
         for row, (comparison, _) in zip(rows, comparisons):
@@ -755,7 +755,7 @@ def plot_conditional_intensity(root, output, alignment_script, layout_report):
         axis.set_xlabel(f'{metric} × 1,000')
     handles = [Line2D([], [], label=label, color=color, marker=marker, markersize=4)
                for _, label, color, marker in cohorts]
-    figure.legend(handles=handles, loc='upper center', bbox_to_anchor=(.59, .984), ncol=2,
+    figure.legend(handles=handles, loc='upper center', bbox_to_anchor=(.54, .949), ncol=2,
                   frameon=False, handlelength=1.4, handletextpad=.5, columnspacing=1.6)
     if alignment_script:
         sys.path.insert(0, str(alignment_script))
@@ -1018,7 +1018,7 @@ def plot_dispersion_pooling(root, output, alignment_script, layout_report):
                ('sharing', 'wide_max', '96, mean + max'),
                ('sharing', 'wide_std', '96, mean + SD'))
     figure, axes = plt.subplots(1, 2, figsize=(6.5, 2.52), sharex=True)
-    figure.subplots_adjust(left=.158, right=.982, bottom=.207, top=.738, wspace=.65)
+    figure.subplots_adjust(left=.158, right=.982, bottom=.207, top=.772, wspace=.65)
     y = (3.28, 2.32, .99, .03)
     limits = [0.]
     for cohort, _, color, marker, offset in cohorts:
@@ -1043,7 +1043,7 @@ def plot_dispersion_pooling(root, output, alignment_script, layout_report):
         axis.set_title(title, loc='left', fontweight='bold', fontsize=8.5, pad=7)
     handles = [Line2D([], [], color=color, marker=marker, markersize=4.5, linestyle='none', label=label)
                for _, label, color, marker, _ in cohorts]
-    figure.legend(handles=handles, loc='upper center', bbox_to_anchor=(.55, .99),
+    figure.legend(handles=handles, loc='upper center', bbox_to_anchor=(.54, .945),
                   ncols=2, frameon=False, borderaxespad=0., columnspacing=2.)
     if alignment_script:
         sys.path.insert(0, str(alignment_script))
@@ -1058,7 +1058,7 @@ def plot_seed_ensemble(root, output, alignment_script, layout_report):
                   ('rmnet_uniform', 'RM-Net', '#16736D', 'o'))
     cohorts = (('sims_v2', 'CH-SIMS v2', .13, 'D'), ('omg', 'OMG-Emotion', -.13, 'o'))
     figure, axes = plt.subplots(1, 3, figsize=(6.64, 2.5))
-    figure.subplots_adjust(left=.092, right=.981, top=.738, bottom=.224, wspace=.69)
+    figure.subplots_adjust(left=.092, right=.981, top=.775, bottom=.224, wspace=.69)
     axes[1].sharey(axes[0])
     effect_axis = axes[-1]
     effect_rows = (2., 1., 0.)
@@ -1095,7 +1095,7 @@ def plot_seed_ensemble(root, output, alignment_script, layout_report):
                for _, label, color, marker in references]
     names = [Line2D([], [], color='black', marker=marker, markersize=3.9, linestyle='none', label=title)
              for _, title, _, marker in cohorts]
-    figure.legend(handles=handles + names, loc='upper center', bbox_to_anchor=(.523, .991),
+    figure.legend(handles=handles + names, loc='upper center', bbox_to_anchor=(.507, .948),
                   ncols=5, frameon=False, borderaxespad=0., columnspacing=1.4, handlelength=1.5)
     if alignment_script:
         sys.path.insert(0, str(alignment_script))
@@ -1113,7 +1113,7 @@ def plot_gap_location(root, output, alignment_script, layout_report):
                  ('worst_start', 'Worst location'))
     stages = (('anchor', 'Anchor'), ('fusion', 'Fusion'), ('interaction', 'Interaction'))
     figure, axes = plt.subplots(1, 2, figsize=(6.5, 2.24), sharex=True)
-    figure.subplots_adjust(left=.182, right=.983, bottom=.245, top=.72, wspace=.48)
+    figure.subplots_adjust(left=.182, right=.983, bottom=.245, top=.758, wspace=.48)
     effects, components = axes
     rows = (2., 1., 0.)
     limits = [0.]
@@ -1139,7 +1139,7 @@ def plot_gap_location(root, output, alignment_script, layout_report):
         axis.set_title(title, loc='left', fontweight='bold', fontsize=8.5, pad=7)
     handles = [Line2D([], [], color=color, marker=marker, markersize=4.2, linestyle='none', label=label)
                for _, label, color, marker, _ in cohorts]
-    figure.legend(handles=handles, loc='upper center', bbox_to_anchor=(.55, .99),
+    figure.legend(handles=handles, loc='upper center', bbox_to_anchor=(.54, .945),
                   ncols=2, frameon=False, borderaxespad=0., columnspacing=2.)
     if alignment_script:
         sys.path.insert(0, str(alignment_script))

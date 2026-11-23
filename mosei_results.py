@@ -1,4 +1,4 @@
-"""Summarize and time the matched CMU-MOSEI forecasts."""
+"""Summarize and time the matched text-and-vision benchmarks."""
 
 import argparse
 import json
@@ -17,7 +17,8 @@ from networks import AudiovisualResidual, TextAnchor, intensity_anchor, sentimen
 from polarity_pool import coordinates, outcomes
 from published_baselines import UPSTREAM, build_published
 from published_inference import batch_layout, load_weights, measure
-from published_seed_effects import scaled_risk
+from published_seed_effects import BASELINES, run_paths, scaled_risk
+from score_anchor_effects import SEEDS as TEN_SEEDS
 from train import BatchSource, visual_component_options
 
 
@@ -28,6 +29,28 @@ def runs_for(reference_runs, matched_runs, seeds, models):
             paths[name] = [reference_runs / f'mosei_lnln_regression_seed{seed}' for seed in seeds]
         else:
             paths[name] = [matched_runs / f'{name.replace("-", "_")}_seed{seed}' for seed in seeds]
+    return paths
+
+
+def earlier_corpus_runs(reference_runs, matched_runs, seeds, models, cohort):
+    original = run_paths(reference_runs, seeds, cohort)
+    shared = 'fixed_pooling' if cohort == 'sims_v2' else 'pointwise'
+    paths = {'SentiCouple': original[shared]}
+    reference_methods = {model: name for name, model in BASELINES.items()}
+    for model in models:
+        if model in reference_methods:
+            paths[model] = original[reference_methods[model]]
+        else:
+            prefix = f'{cohort}_{model.replace("-", "_")}'
+            paths[model] = [matched_runs / f'{prefix}_seed{seed}' for seed in seeds]
+    return paths
+
+
+def mosi_runs(reference_runs, matched_runs, seeds, models):
+    paths = {'SentiCouple': [reference_runs / f'mosi_matched_shared_seed{seed}' for seed in seeds]}
+    for model in models:
+        prefix = f'mosi_matched_{model.replace("-", "_")}'
+        paths[model] = [matched_runs / f'{prefix}_seed{seed}' for seed in seeds]
     return paths
 
 
@@ -97,11 +120,13 @@ def summarize_benchmark(paths, seeds, resamples):
 def predictor_for(run, name, source, upstream):
     meta, = load_metadata([run])
     config = meta['config']
+    audio_dim = source.audio.shape[-1]
+    visual_only = audio_dim == 0
     if name == 'SentiCouple':
         bins, width = (config[key] for key in ('bins', 'width'))
-        anchor = load_weights(TextAnchor(source.text.shape[-1], bins, width, visual_only=True),
+        anchor = load_weights(TextAnchor(source.text.shape[-1], bins, width, visual_only=visual_only),
                               run / 'anchor.pt', source.device)
-        fusion = AudiovisualResidual(0, source.vision.shape[-1], width,
+        fusion = AudiovisualResidual(audio_dim, source.vision.shape[-1], width,
                                      attention_bins=bins if config['backbone'] != 'temporal' else None,
                                      text_query=config['backbone'] == 'attention',
                                      visual_encoding=config.get('visual_encoding', 'normalized'),
@@ -120,10 +145,10 @@ def predictor_for(run, name, source, upstream):
         parameters = sum(p.numel() for model in (anchor, fusion) for p in model.parameters() if p.requires_grad)
         return predict, parameters, ('intensity', 'intensity_score')
 
-    dimensions = (source.text.shape[-1], 1, source.vision.shape[-1])
+    dimensions = (source.text.shape[-1], max(1, audio_dim), source.vision.shape[-1])
     lengths = (source.text.shape[1], source.audio.shape[1], source.vision.shape[1])
     head = config['head']
-    model = build_published(config['model'], upstream, config['corpus'], dimensions, lengths, head, True)
+    model = build_published(config['model'], upstream, config['corpus'], dimensions, lengths, head, visual_only)
     model = load_weights(model, run / 'model.pt', source.device)
     if head == 'regression':
         center, scale, lower, log_gap, slope = meta['selection']['calibration']
@@ -144,15 +169,21 @@ def predictor_for(run, name, source, upstream):
 
 
 @torch.inference_mode()
-def profile_all(paths, upstream, data, eval_groups):
+def profile_all(paths, upstream, data, eval_groups, *, cohort='mosei', group_reference=None, visual_only=True):
     torch.set_num_threads(4)
     torch.backends.cudnn.deterministic = True
     device = torch.device('cuda')
-    clips, split = load_clips(data, 24, 'official', 1729, eval_groups=eval_groups)
-    verify_development_split(paths['SentiCouple'][0], clips, split, 97)
+    split_name = 'new-videos' if cohort == 'sims_v2' else 'official'
+    neutral_margin = .10 if cohort == 'omg' else 0.
+    clips, split = load_clips(data, 24, split_name, 1729, eval_groups=eval_groups,
+                             group_reference=group_reference, neutral_margin=neutral_margin)
+    if cohort == 'mosei':
+        verify_development_split(paths['SentiCouple'][0], clips, split, 97,
+                                 inputs='visual' if visual_only else 'audiovisual')
     views = observation_views(clips, [.35, .65], 1777)
-    views[:, 0] = False
-    source = BatchSource(clips, views, split['fit'], device, visual_only=True, stream_text=True)
+    if visual_only:
+        views[:, 0] = False
+    source = BatchSource(clips, views, split['fit'], device, visual_only=visual_only, stream_text=True)
     held = split['eval']
     predictors, archived, timings = {}, {}, {}
     for name, (run, *_) in paths.items():
@@ -171,9 +202,14 @@ def profile_all(paths, upstream, data, eval_groups):
                     np.testing.assert_allclose(values.cpu().numpy(), packet[key][condition, rows],
                                                atol=1e-4, rtol=1e-4, err_msg=name)
         predictors[name] = predict
-        archived[name] = [packet[key] for key in keys]
+        archived[name] = [packet[key][1:3] for key in keys]
         timings[name] = dict(trainable_parameters=parameters, batches={}, max_batch_difference={})
         print(f'{name}: replayed the held-out scores at the original batch size {batch}', flush=True)
+    return profile_cached(source, held, predictors, archived, timings)
+
+
+def profile_cached(source, held, predictors, archived, timings):
+    device = source.device
     for size, layout in batch_layout(len(held)):
         maximum = {name: [0., 0.] for name in predictors}
         batches = []
@@ -185,7 +221,7 @@ def profile_all(paths, upstream, data, eval_groups):
                 for index, (actual, expected) in enumerate(zip(estimates, archived[name], strict=True)):
                     if not np.isfinite(actual).all():
                         raise ValueError(f'{name} produced nonfinite outputs at batch size {size}.')
-                    difference = np.max(np.abs(actual - expected[conditions, rows]))
+                    difference = np.max(np.abs(actual - expected[conditions - 1, rows]))
                     maximum[name][index] = max(maximum[name][index], float(difference))
             batches.append(batch)
         for name, (probabilities, scores) in maximum.items():
@@ -198,26 +234,48 @@ def profile_all(paths, upstream, data, eval_groups):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--cohort', choices=('mosei', 'sims_v2', 'omg', 'mosi'), default='mosei')
     parser.add_argument('--models', choices=('lnln', *SETTINGS), nargs='+', default=['lnln', *SETTINGS])
-    parser.add_argument('--seeds', type=int, choices=SEEDS, nargs='+', default=SEEDS)
+    parser.add_argument('--seeds', type=int, nargs='+')
     parser.add_argument('--resamples', type=int, default=20000)
     parser.add_argument('--reference-runs', type=Path, default=ROOT / 'runs')
-    parser.add_argument('--matched-runs', type=Path, default=ROOT / 'runs/mosei_matched')
-    parser.add_argument('--data', type=Path, default=ROOT / 'data/mosei_aligned_50.pkl')
-    parser.add_argument('--eval-groups', type=Path, default=ROOT / 'splits/mosei_eval_videos.txt')
+    parser.add_argument('--matched-runs', type=Path)
+    parser.add_argument('--data', type=Path)
+    parser.add_argument('--group-reference', type=Path)
+    parser.add_argument('--eval-groups', type=Path)
     parser.add_argument('--profile-upstream', type=Path, nargs='+',
                         help='Profile seed 97 on CUDA with the pinned checkouts in model order.')
     parser.add_argument('--output', type=Path, required=True)
     options = parser.parse_args()
-    if options.resamples < 1 or len(set(options.seeds)) != len(options.seeds) or len(set(options.models)) != len(options.models):
+    is_mosei = options.cohort == 'mosei'
+    default_seeds = SEEDS if options.cohort in ('mosei', 'mosi') else TEN_SEEDS
+    seeds = options.seeds or default_seeds
+    if options.resamples < 1 or len(set(seeds)) != len(seeds) or len(set(options.models)) != len(options.models):
         parser.error('Use positive resampling counts and distinct models and seeds.')
-    paths = runs_for(options.reference_runs, options.matched_runs, options.seeds, options.models)
-    result = summarize_benchmark(paths, options.seeds, options.resamples)
+    if not set(seeds).issubset(default_seeds):
+        parser.error(f'Seeds for {options.cohort} must come from {default_seeds}.')
+    if is_mosei:
+        matched = options.matched_runs or ROOT / 'runs/mosei_matched'
+        paths = runs_for(options.reference_runs, matched, seeds, options.models)
+    else:
+        matched = options.matched_runs or options.reference_runs
+        if options.cohort == 'mosi':
+            paths = mosi_runs(options.reference_runs, matched, seeds, options.models)
+        else:
+            paths = earlier_corpus_runs(options.reference_runs, matched, seeds, options.models, options.cohort)
+    result = summarize_benchmark(paths, seeds, options.resamples)
     if options.profile_upstream:
-        if options.seeds[0] != 97 or len(options.profile_upstream) != len(options.models):
+        if seeds[0] != 97 or len(options.profile_upstream) != len(options.models):
             parser.error('Profile seed 97 first and supply one upstream checkout for each reference model.')
+        feature_files = {'mosei': 'mosei_aligned_50.pkl', 'sims_v2': 'ch_sims_v2_unaligned.pkl',
+                         'omg': 'omg_unaligned.pkl', 'mosi': 'mosi_unaligned_50.pkl'}
+        data = options.data or ROOT / 'data' / feature_files[options.cohort]
+        eval_groups = options.eval_groups or (ROOT / 'splits/mosei_eval_videos.txt' if is_mosei else None)
+        group_reference = options.group_reference
+        if options.cohort == 'sims_v2' and group_reference is None:
+            group_reference = ROOT / 'data/ch_sims_unaligned_39.pkl'
         result['timing'] = profile_all(paths, dict(zip(options.models, options.profile_upstream, strict=True)),
-                                       options.data, options.eval_groups)
+                                       data, eval_groups, cohort=options.cohort, group_reference=group_reference)
     options.output.parent.mkdir(parents=True, exist_ok=True)
     temporary = options.output.with_suffix('.tmp')
     temporary.write_text(json.dumps(result, indent=2, allow_nan=False) + '\n', encoding='utf-8')

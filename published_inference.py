@@ -117,9 +117,12 @@ def observed_features(args, device):
 
 
 def batch_layout(n):
-    ordered = np.random.default_rng(2317).permutation(n)
+    sizes = ((1, 64), (32, 16))
+    if n < 32:
+        raise ValueError('A timing cohort needs at least 32 distinct clips.')
+    ordered = np.resize(np.random.default_rng(2317).permutation(n), sum(size * count for size, count in sizes))
     begin = 0
-    for size, count in ((1, 64), (32, 16)):
+    for size, count in sizes:
         end = begin + size * count
         positions = ordered[begin:end].reshape(count, size)
         conditions = 1 + np.arange(begin, end).reshape(count, size) % 2

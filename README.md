@@ -8,7 +8,7 @@ Qisong Zhou, Shu Zhang, Yi Liu, and Yuting Liu. Southwest Petroleum University.
 
 ## Results
 
-Relative to a matched independent intensity head, the shared update lowered ranked probability score by 0.0059 on CH-SIMS v2 and class-balanced ranked probability score by 0.0034 on RAVDESS. On CH-SIMS v2, a 32-clip forward pass using cached inputs took 1.97 ms on an RTX 5070.
+Sharing the signed update reduced ranked probability score by 0.0081 with text, audio and vision on CH-SIMS v2 and by 0.0059 with text and vision. It also reduced class-balanced ranked probability score by 0.0034 on held-out RAVDESS actors. In the matched three-stream comparison on CH-SIMS v2 and CMU-MOSEI, SentiCouple used 85–88% fewer downstream parameters than UCMR-Net and achieved 3.5–4.5 percentage points higher mean macro-F1.
 
 ## Start here
 
@@ -17,7 +17,8 @@ Relative to a matched independent intensity head, the shared update lowered rank
 | Train the text anchor and shared or independent heads | [`train.py`](train.py) |
 | Inspect the architecture and shared score update | [`networks.py`](networks.py) |
 | Match the published fusion cores | [`benchmark.py`](benchmark.py), [`published_baselines.py`](published_baselines.py) |
-| Refit the CMU-MOSEI baselines and replay the comparison | [`benchmark_mosei.py`](benchmark_mosei.py), [`mosei_results.py`](mosei_results.py) |
+| Compare six models under matched visual gaps | [`benchmark_mosei.py`](benchmark_mosei.py), [`mosei_results.py`](mosei_results.py), [`frozen_benchmark.py`](frozen_benchmark.py) |
+| Replay the three-stream comparison with UCMR-Net | [`three_stream_benchmark.py`](three_stream_benchmark.py) |
 | Recompute the paired estimates | [`primary_comparisons.py`](primary_comparisons.py), [`conditional_intensity_effects.py`](conditional_intensity_effects.py) |
 | Regenerate the manuscript figures from prediction packets | [`paper_figures.py`](paper_figures.py), [`REPRODUCE.md`](REPRODUCE.md) |
 

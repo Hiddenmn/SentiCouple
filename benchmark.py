@@ -14,7 +14,7 @@ from torch.nn import functional as F
 
 from ablate import ranked_probability_score
 from data import load_clips, observation_views
-from mosei_baselines import MOSEI_BASELINES
+from mosei_baselines import MOSEI_BASELINES, RATING_TO_MOSEI_SCALE
 from networks import TextAnchor
 from published_baselines import ANCHORED_HEADS, UPSTREAM, AnchoredReadout, build_published
 from train import BatchSource, index_batches
@@ -322,8 +322,10 @@ def main():
         parser.error('Use the official valence split and pass --neutral-margin .10.')
     if args.model == 'rm-net' and args.head != 'joint':
         parser.error('RM-Net uses the published categorical and additive intensity heads (--head joint).')
-    if args.model in MOSEI_BASELINES and (args.corpus, args.head, args.inputs) != ('mosei', 'regression', 'visual'):
-        parser.error('Use --corpus mosei --head regression --inputs visual for this cached-feature adapter.')
+    if args.model in MOSEI_BASELINES and (args.corpus not in RATING_TO_MOSEI_SCALE or args.head != 'regression'):
+        parser.error('Use a corpus with a known rating scale and --head regression for this cached-feature adapter.')
+    if args.model == 'api' and args.inputs != 'visual':
+        parser.error('Use --inputs visual for the API adapter.')
     if args.model != 'rm-net' and args.rmnet_class_weighting != 'inverse-frequency':
         parser.error('--rmnet-class-weighting changes the classification terms of the RM-Net core.')
     if min(args.epochs, args.patience, args.threads) < 1 or args.batch < 2 or args.lr <= 0:
