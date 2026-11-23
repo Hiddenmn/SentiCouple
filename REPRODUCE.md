@@ -24,4 +24,4 @@ python paper_figures.py --runs runs --output figures --supplement
 ```
 
 The CREMA-D excerpts in the paper retain their [database contents license](https://opendatacommons.org/licenses/dbcl/1-0/). To reconstruct the figure packets from the original clips, run `figure_example.py`, `gap_examples.py`, or `statement_examples.py` with the CREMA-D checkout and the saved fit inputs. Each script documents the required paths.
-The modality figure compares the same utterance and gap masks using the stored three-stream and single-stream fits. Regenerate the packet with audiovisual_example.py using the seed-97 CH-SIMS v2 forecasts, the paired stream ablations, and the original feature packet.
+The modality figure compares the same utterance and gap masks using the stored three-stream and single-stream fits. Regenerate the packet with `audiovisual_example.py` using the seed-97 CH-SIMS v2 forecasts, the paired stream ablations, and the original feature packet. The same packet supplies the acoustic channels in the architecture figure.

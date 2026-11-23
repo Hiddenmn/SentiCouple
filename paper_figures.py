@@ -1,7 +1,6 @@
 """Draw the manuscript figures from the released prediction packets."""
 
 import argparse
-from functools import partial
 import json
 from pathlib import Path
 import sys
@@ -65,27 +64,33 @@ def forest_axis(axis, labels, xlabel, limits=None):
         axis.margins(x=.11)
 
 
-def architecture_flow(axis, visual, visible):
+def architecture_flow(axis, visual, visible, audio, audible):
     axis.set(xlim=(0, 1.02), ylim=(0, 1))
     axis.set_axis_off()
     panel(axis, 'b', y=1.03)
     box(axis, .103, .824, .174, .235, 'Text + masks', PALE_BLUE)
-    box(axis, .103, .500, .174, .235, 'Audio bins', PALE_AMBER)
-    box(axis, .103, .176, .174, .235, '', PALE_TEAL)
-    axis.text(.103, .228, 'Observed visual bins', ha='center', va='center', fontsize=7.4)
-    features = normalized_channels(visual)
-    sample = np.ma.array(features, mask=np.broadcast_to(~visible, features.shape))
-    axis.imshow(sample, extent=(.034, .172, .084, .167), cmap=CHANNELS.with_extremes(bad='#F9FAFB'),
-                vmin=-2, vmax=2, aspect='auto', interpolation='none', zorder=3)
-    axis.add_patch(Rectangle((.034, .084), .138, .083, facecolor='none',
-                             edgecolor='#8D9CA8', linewidth=.45, zorder=4))
+    for row, label, fill, values, observed in (
+        (.500, 'Observed audio bins', PALE_AMBER, audio, audible),
+        (.176, 'Observed visual bins', PALE_TEAL, visual, visible),
+    ):
+        box(axis, .103, row, .174, .235, '', fill)
+        axis.text(.103, row + .052, label, ha='center', va='center', fontsize=7.4)
+        features = normalized_channels(values)
+        sample = np.ma.array(features, mask=np.broadcast_to(~observed, features.shape))
+        bottom = row - .092
+        axis.imshow(sample, extent=(.034, .172, bottom, bottom + .083),
+                    cmap=CHANNELS.with_extremes(bad='#F9FAFB'),
+                    vmin=-2, vmax=2, aspect='auto', interpolation='none', zorder=3)
+        axis.add_patch(Rectangle((.034, bottom), .138, .083, facecolor='none',
+                                 edgecolor='#8D9CA8', linewidth=.45, zorder=4))
     box(axis, .337, .824, .211, .235, 'Text anchor\n' + r'$\ell,\ s_0$', PALE_BLUE)
     box(axis, .337, .500, .211, .235, 'Audio encoder\nMean + max', PALE_AMBER)
     box(axis, .337, .176, .211, .235, 'Visual encoder\nMean + max', PALE_TEAL)
-    box(axis, .597, .500, .162, .346, '', PALE_PINK)
-    axis.text(.537, .500, 'Fusion', ha='left', va='center', fontsize=8.2)
-    axis.text(.654, .567, r'$\nu$', color=INDIGO, ha='center', va='center', fontsize=9.6)
-    axis.text(.654, .415, r'$\delta$', color=MAGENTA, ha='center', va='center', fontsize=9.6)
+    box(axis, .597, .500, .162, .384, '', PALE_PINK)
+    axis.text(.597, .620, 'Fusion', ha='center', va='center', fontsize=8.2)
+    axis.text(.594, .505, r'Neutral $\nu$', color=INDIGO, ha='center', va='center', fontsize=7.6)
+    axis.text(.594, .386, r'Shared $\delta$', color=MAGENTA, ha='center', va='center',
+              fontsize=7.6, weight='bold')
     axis.add_patch(Rectangle((.763, .057), .253, .862, facecolor='white', edgecolor='black', linewidth=.75))
     axis.plot([.763, 1.016], [.489, .489], color='black', linewidth=.6)
     axis.text(.889, .75, 'Polarity', ha='center', va='center', fontsize=8.35, weight='bold')
@@ -100,11 +105,11 @@ def architecture_flow(axis, visual, visible):
     arrow(axis, [(.444, .500), (.513, .500)])
     arrow(axis, [(.444, .176), (.482, .176), (.482, .395), (.513, .395)])
     arrow(axis, [(.444, .875), (.695, .875), (.695, .957), (.887, .957), (.887, .919)])
-    arrow(axis, [(.679, .567), (.701, .567), (.701, .706), (.763, .706)], color=INDIGO)
-    axis.plot([.679, .725], [.415, .415], color=MAGENTA, linewidth=.95)
-    arrow(axis, [(.725, .415), (.725, .575), (.763, .575)], color=MAGENTA)
-    arrow(axis, [(.725, .415), (.725, .305), (.763, .305)], color=MAGENTA)
-    axis.scatter([.725], [.415], s=7, color=MAGENTA, zorder=4)
+    arrow(axis, [(.679, .505), (.701, .505), (.701, .706), (.763, .706)], color=INDIGO)
+    axis.plot([.679, .725], [.386, .386], color=MAGENTA, linewidth=.95)
+    arrow(axis, [(.725, .386), (.725, .575), (.763, .575)], color=MAGENTA)
+    arrow(axis, [(.725, .386), (.725, .305), (.763, .305)], color=MAGENTA)
+    axis.scatter([.725], [.386], s=7, color=MAGENTA, zorder=4)
 
 
 def filmstrip(axis, frames, slots):
@@ -160,6 +165,8 @@ def probability_stack(axis, row, prediction, alpha):
 def model_trace(runs):
     with np.load(runs / 'paper_example.npz', allow_pickle=False) as packet:
         data = dict(packet)
+    with np.load(runs / 'audiovisual_example.npz', allow_pickle=False) as packet:
+        audio, audible = packet['audio'], packet['masks'][1, 0]
     figure = plt.figure(figsize=(6.75, 5.70))
     grid = figure.add_gridspec(3, 19, left=.126, right=.972, top=.916, bottom=.181,
                               height_ratios=(.74, 1.13, 1.63), hspace=.40, wspace=0)
@@ -176,7 +183,7 @@ def model_trace(runs):
     frames.text(hidden.mean() + .5, -.29, VIEWS[1], ha='center', va='top',
                 fontsize=7.25, color=MAGENTA, clip_on=False)
     panel(frames, 'a', y=top + .105)
-    architecture_flow(figure.add_subplot(grid[1, :]), data['visual'], data['masks'][1])
+    architecture_flow(figure.add_subplot(grid[1, :]), data['visual'], data['masks'][1], audio, audible)
 
     observations, shifts, probabilities, intensity = (figure.add_subplot(grid[2, span]) for span in
                                                        (slice(0, 5), slice(6, 9), slice(10, 14), slice(15, 19)))
@@ -184,8 +191,8 @@ def model_trace(runs):
     channels = normalized_channels(data['visual'])
     for i, row in enumerate(rows):
         image = feature_strip(observations, channels, data['masks'][i], row)
-        shifts.barh(row + .13, data['signed'][i], height=.205, color=MAGENTA, zorder=2)
-        shifts.barh(row - .13, data['neutral'][i], height=.205, color=INDIGO, zorder=2)
+        shifts.barh(row + .145, data['signed'][i], height=.255, color=MAGENTA, zorder=2)
+        shifts.barh(row - .145, data['neutral'][i], height=.255, color=INDIGO, zorder=2)
         probability_stack(probabilities, row + .143, data['anchor'][i], .39)
         probability_stack(probabilities, row - .143, data['fused'][i], 1.0)
         before, after = data['anchor_score'][i], data['fused_score'][i]
@@ -195,6 +202,9 @@ def model_trace(runs):
         if i == 1:
             for axis in (observations, shifts, probabilities, intensity):
                 axis.axhspan(row - .465, row + .465, facecolor=PALE_PINK, zorder=0)
+            for offset, update in ((.145, data['signed'][i]), (-.145, data['neutral'][i])):
+                shifts.text(update / 2, row + offset, f'{update:.2f}'.replace('-', '−'),
+                            ha='center', va='center', color='white', fontsize=6.3)
             polarity = int(data['polarity'])
             for y, prediction, color in ((row + .143, data['anchor'][i], INK),
                                          (row - .143, data['fused'][i], 'white')):
@@ -658,13 +668,11 @@ def supplementary(runs, output, alignment_script, report_directory):
         'neutral_readout': supporting.plot_neutral_readout,
         'ordinal_controls': supporting.plot_ordinal_controls,
         'probability_pool': supporting.plot_probability_pool,
-        'published_seeds': partial(supporting.plot_published_cohorts, include_raw=False),
         'seed_sensitivity': supporting.plot_seed_sensitivity,
         'visual_components': supporting.plot_visual_components,
     }
     with_layout = {
         'audio_channel': supporting.plot_audio_channel,
-        'benchmark_components': supporting.plot_benchmark_components,
         'class_weighting': supporting.plot_class_weighting,
         'conditional_intensity': supporting.plot_conditional_intensity,
         'cremad': supporting.plot_cremad,
@@ -676,6 +684,8 @@ def supplementary(runs, output, alignment_script, report_directory):
         'seed_ensemble': supporting.plot_seed_ensemble,
         'view_stability': supporting.plot_view_stability,
     }
+    report = report_directory / 'benchmark_components_alignment.json' if report_directory else None
+    supporting.plot_benchmark_components(runs, output / 'matched_checks.pdf', alignment_script, report)
     with TemporaryDirectory(prefix='kbs_supporting_panels_') as temporary:
         directory = Path(temporary)
         drawn = set()

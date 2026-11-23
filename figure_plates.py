@@ -11,7 +11,6 @@ from xml.etree import ElementTree as ET
 
 SUPPLEMENT_PLATES = {
     'actor_controls': (('fixed_transcripts', 2), ('cremad', 3)),
-    'matched_checks': (('published_seeds', 2), ('benchmark_components', 4)),
     'score_controls': (('ordinal_controls', 1), ('conditional_intensity', 2)),
     'frozen_targets': (('moud_transfer', 1), ('frozen_dialogue', 1), ('msp_face_transfer', 1)),
     'refit_checks': (('msp_face_refit', 2),),

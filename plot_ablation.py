@@ -964,10 +964,10 @@ def plot_benchmark_components(root, output, alignment_script, layout_report):
     references = (('rmnet_uniform', 'RM-Net'), ('lnln_joint', 'LNLN'))
     groups = (('no_vision', 'without vision', '#2766A6'),
               ('visual_changes', 'change with vision', '#16736D'))
-    penalties = (('compact', 'Compact', '#2766A6'), ('rmnet', 'RM-Net', '#16736D'),
-                 ('interaction', 'RM-Net − compact', '#824369'))
+    penalties = (('compact', 'SentiCouple', '#2766A6'), ('rmnet', 'RM-Net', '#16736D'),
+                 ('interaction', 'RM-Net − SentiCouple', '#824369'))
     figure, axes = plt.subplots(2, 2, figsize=(6.65, 3.55), sharex='row', sharey='row')
-    figure.subplots_adjust(left=.235, right=.988, top=.91, bottom=.16, hspace=.81, wspace=.16)
+    figure.subplots_adjust(left=.235, right=.988, top=.91, bottom=.16, hspace=.68, wspace=.16)
     comparison_rows = (3.3, 2.3, .95, -.05)
     penalty_rows = (2., 1., 0.)
     for column, (cohort, title) in enumerate(cohorts):
@@ -987,7 +987,7 @@ def plot_benchmark_components(root, output, alignment_script, layout_report):
         upper.set(xlim=(-22, 57), xticks=(-20, 0, 20, 40), ylim=(-.62, 3.87))
         lower.set(xlim=(-2.61, 2.69), xticks=(-2, -1, 0, 1, 2), ylim=(-.5, 2.5))
         upper.set_title(f'{"ab"[column]}  {title}', loc='left', fontweight='bold', fontsize=8.5, pad=6)
-        lower.set_title(f'{"cd"[column]}  {title}', loc='left', fontweight='bold', fontsize=8.5, pad=6)
+        lower.set_title('cd'[column], loc='left', fontweight='bold', fontsize=8.5, pad=6)
         for axis, xlabel in zip((upper, lower), ('Contribution to RPS gap × 1,000',
                                                 'RPS change after shuffling × 1,000'), strict=True):
             axis.axvline(0, color='black', linewidth=.72, linestyle=(0, (3, 3)), zorder=1)
@@ -1002,7 +1002,7 @@ def plot_benchmark_components(root, output, alignment_script, layout_report):
         sys.path.insert(0, str(alignment_script))
         from audit_panel_alignment import require_matplotlib_panel_alignment
         require_matplotlib_panel_alignment(figure, json_out=layout_report)
-    export(figure, output)
+    export(figure, output, align_panels=True)
 
 
 def plot_dispersion_pooling(root, output, alignment_script, layout_report):
