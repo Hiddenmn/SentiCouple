@@ -55,6 +55,19 @@ The first command uses the bundled same-seed SentiCouple forecasts to match clip
 
 Refit LNLN using `benchmark.py --model lnln --upstream <LNLN_DIR> --corpus mosei --head regression --split official --inputs visual --data data/mosei_aligned_50.pkl --eval-groups splits/mosei_eval_videos.txt --epochs 32 --patience 8 --batch 32 --lr 0.001 --weight-decay 0.01 --device cuda`. Pass the seed and its matching SentiCouple run through `--seed` and `--match-run`. Save each run as `mosei_lnln_regression_seed<seed>` alongside the SentiCouple fits. Point `--reference-runs` to that directory to use the refits in `benchmark_mosei.py` and `mosei_results.py`. The timing replay uses the bundled seed 97 weights and checks its forecasts against the saved probabilities and scores before timing.
 
+## Reproduce OMG-Emotion GPU latency
+
+Use the OMG-Emotion feature packet and bundled seed 97 weights. Run the four methods in the order `pointwise`, `tfr_joint`, `lnln_joint`, `rmnet_core`, then repeat in reverse order. Each invocation checks the forecast and times the same single-clip and 32-clip batches. Use the pinned checkout for each reference through `--upstream`.
+
+```sh
+python published_inference.py --cohort omg --method pointwise --runs runs \
+  --data data/omg_unaligned.pkl --output omg_pointwise_timing.json
+python published_inference.py --cohort omg --method tfr_joint --runs runs \
+  --data data/omg_unaligned.pkl --upstream "$TFR_DIR" --output omg_tfr_timing.json
+```
+
+Table 4 reports first-order medians. `runs/omg_inference_profile.json` retains both timing orders and the recorded quartiles.
+
 ## Media examples
 
 The CREMA-D excerpts in the paper retain their [database contents license](https://opendatacommons.org/licenses/dbcl/1-0/). To reconstruct the figure packets from the original clips, run `figure_example.py`, `gap_examples.py`, or `statement_examples.py` with the CREMA-D checkout and the saved fit inputs. Each script documents the required paths.

@@ -1,4 +1,4 @@
-"""Time the matched CH-SIMS v2 predictors on cached input features."""
+"""Time matched CH-SIMS v2 and OMG-Emotion predictors on cached input features."""
 
 import argparse
 import json
@@ -13,7 +13,7 @@ from compare_benchmarks import load_metadata
 from data import load_clips, observation_views
 from networks import AudiovisualResidual, TextAnchor, intensity_anchor, sentiment_shift
 from published_baselines import build_published
-from published_seed_effects import BASELINES, CANDIDATES, run_paths, verify_training
+from published_seed_effects import BASELINES, BENCHMARK_CANDIDATES, CANDIDATES, run_paths, verify_training
 from train import BatchSource, visual_component_options
 
 
@@ -106,7 +106,10 @@ def measure_interleaved(predictors, batches, repeat):
 
 
 def observed_features(args, device):
-    clips, split = load_clips(args.data, 24, 'new-videos', 1729, group_reference=args.group_reference)
+    if args.cohort == 'omg':
+        clips, split = load_clips(args.data, 24, 'official', 1729, neutral_margin=.10)
+    else:
+        clips, split = load_clips(args.data, 24, 'new-videos', 1729, group_reference=args.group_reference)
     views = observation_views(clips, [.35, .65], 1777)
     views[:, 0] = False
     source = BatchSource(clips, views, split['fit'], device, visual_only=True, stream_text=True)
@@ -133,9 +136,9 @@ def profile(args):
         run, arm, reference = (args.runs / 'sims_v2_visual_components_seed97',
                                'intensity_projection', 'fixed_pooling')
     else:
-        run, arm, reference = run_paths(args.runs, (97,))[args.method][0], 'intensity', args.method
+        run, arm, reference = run_paths(args.runs, (97,), args.cohort)[args.method][0], 'intensity', args.method
     metadata, = load_metadata([run])
-    verify_training(reference, [metadata], (97,))
+    verify_training(reference, [metadata], (97,), args.cohort)
     clips, test, views, source = observed_features(args, device)
     archived = read_predictions(run)
     np.testing.assert_array_equal(archived['ids'], clips.ids[test])
@@ -162,7 +165,7 @@ def profile(args):
                              f'and {score_error:g} in intensity.')
         summaries[str(size)] = dict(**measure(predict, batches),
                                     max_probability_difference=probability_error, max_intensity_difference=score_error)
-    return dict(method=args.method, seed=97, device=torch.cuda.get_device_name(device),
+    return dict(method=args.method, cohort=args.cohort, seed=97, device=torch.cuda.get_device_name(device),
                 torch=str(torch.__version__), times=summaries)
 
 
@@ -208,14 +211,23 @@ def profile_visual_pair(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    visual_controls = ('visual_projection', 'visual_pooling_pair')
     parser.add_argument('--method', required=True,
-                        choices=(*CANDIDATES, *BASELINES, 'visual_projection', 'visual_pooling_pair'))
+                        choices=(*CANDIDATES, 'pointwise', *BASELINES, *visual_controls))
+    parser.add_argument('--cohort', choices=BENCHMARK_CANDIDATES, default='sims_v2')
     parser.add_argument('--runs', required=True, type=Path)
     parser.add_argument('--data', required=True, type=Path)
-    parser.add_argument('--group-reference', required=True, type=Path)
+    parser.add_argument('--group-reference', type=Path)
     parser.add_argument('--upstream', type=Path)
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
+    methods = (*BENCHMARK_CANDIDATES[args.cohort], *BASELINES)
+    if args.cohort == 'sims_v2':
+        methods += visual_controls
+        if args.group_reference is None:
+            parser.error('Supply the original CH-SIMS packet as --group-reference for CH-SIMS v2.')
+    if args.method not in methods:
+        parser.error(f'{args.method} is not a profiled method for {args.cohort}.')
     if args.method in BASELINES and not args.upstream:
         parser.error('Supply the pinned checkout for the published core.')
     result = profile_visual_pair(args) if args.method == 'visual_pooling_pair' else profile(args)
