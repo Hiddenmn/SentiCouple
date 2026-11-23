@@ -7,9 +7,10 @@ import sys
 
 import matplotlib
 matplotlib.use('Agg')
-from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+from matplotlib.colors import LinearSegmentedColormap, ListedColormap, TwoSlopeNorm
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 from matplotlib.ticker import MaxNLocator
 import numpy as np
 
@@ -189,7 +190,8 @@ def export(fig, output, *, align_panels=False):
         rows = panel_rows(fig, labels)
         bounds = fig.get_tightbbox(fig.canvas.get_renderer()).padded(.038)
         placements = [{'letters': ''.join(letter for letter, *_ in row),
-                       'baseline_from_top': 72 * (bounds.y1 - row[0][2]) - 1.}
+                       'anchors_from_left': [72 * (x - bounds.x0) for _, x, _, _ in row],
+                       'baseline_from_top': 72 * (bounds.y1 - max(y for _, _, y, _ in row)) - 1.}
                       for row in rows]
         part.path.with_suffix('.panels.json').write_text(json.dumps(placements), encoding='utf-8')
         for _, artist in labels:
@@ -450,28 +452,48 @@ def plot_fixed_transcripts(root, output):
     anchor = report['secondary']['versus_anchor_balanced_rps']
     independent = report['primary_shared_versus_independent_balanced_rps']
     shuffled = report['secondary']['versus_shuffle_balanced_rps']
-    fig, (visual, objective) = plt.subplots(1, 2, figsize=(6.5, 1.94),
-                                            gridspec_kw={'width_ratios': (1., 1.25)})
-    fig.subplots_adjust(left=.10, right=.972, top=.82, bottom=.28, wspace=.59)
-    for axis, y, effect, color in ((visual, .41, anchor, '#237974'),
-                                    (objective, .64, independent, '#1B5E9C'),
-                                    (objective, .09, shuffled, '#945721')):
-        actors = 1000 * np.asarray(effect['by_actor'])
-        offsets = np.linspace(-.096, .096, len(actors))
-        replicate_ticks(axis, actors, y + offsets, color)
-        interval(axis, 1000 * effect['reduction'], 1000 * np.asarray(effect['ci']),
-                 y - .176, color, 'D')
-    for axis, title in [(visual, 'a   Contribution of facial cues'),
-                        (objective, 'b   Effect of score supervision')]:
-        axis.set_title(title, loc='left', fontweight='bold', pad=6)
-        axis.axvline(0, color='black', linewidth=.75, linestyle=(0, (3, 3)), zorder=1)
-        axis.set_ylim(-.21, .89)
-        axis.xaxis.set_major_locator(MaxNLocator(5))
-        axis.set_xlabel(r'Balanced RPS reduction ($10^{-3}$)')
-        axis.spines['left'].set_visible(False)
-        axis.tick_params(axis='y', length=0)
-    visual.set_yticks([])
-    objective.set_yticks([.64, .09], ['Independent\nscore', 'Shuffled\nintensity'])
+
+    anchor_values, independent_values, shuffled_values = (
+        1000 * np.asarray(effect['by_actor']) for effect in (anchor, independent, shuffled)
+    )
+    order = np.argsort(independent_values, kind='stable')
+    ranks = np.arange(1, len(order) + 1)
+    independent_values = independent_values[order]
+    shuffled_values = shuffled_values[order]
+    fig, (visual, objective) = plt.subplots(1, 2, figsize=(6.5, 2.17), sharex=True)
+    fig.subplots_adjust(left=.108, right=.977, top=.72, bottom=.237, wspace=.27)
+
+    visual.bar(ranks, anchor_values[order], width=.77, color=TEAL, alpha=.75, linewidth=0)
+    objective.vlines(ranks, np.minimum(independent_values, shuffled_values),
+                     np.maximum(independent_values, shuffled_values), color=GRID, linewidth=.95)
+    objective.plot(ranks, independent_values, color=INDIGO, marker='o', markersize=2.9,
+                   linestyle='none', label='Independent score')
+    objective.plot(ranks, shuffled_values, color='#A1622D', marker='s', markersize=2.7,
+                   linestyle='none', label='Shuffled ratings')
+
+    summary = len(ranks) + 3
+    for axis, slot, effect, color in ((visual, summary, anchor, TEAL),
+                                      (objective, summary - .57, independent, INDIGO),
+                                      (objective, summary + .57, shuffled, '#A1622D')):
+        mean = 1000 * effect['reduction']
+        low, high = 1000 * np.asarray(effect['ci'])
+        axis.vlines(slot, low, high, color=color, linewidth=1.35, zorder=3)
+        axis.plot(slot, mean, color=color, marker='D', markersize=4.15, linestyle='none', zorder=4)
+
+    for axis, letter, heading in ((visual, 'a', 'Vision vs. text anchor'),
+                                   (objective, 'b', 'Sharing vs. matched heads')):
+        axis.set_title(letter, loc='left', fontweight='bold', pad=8)
+        axis.text(.5, 1.085, heading, transform=axis.transAxes, ha='center', va='bottom', fontsize=8.1)
+        axis.axhline(0, color=SLATE, linewidth=.65, zorder=1)
+        axis.axvline(len(ranks) + 1.4, color=GRID, linewidth=.8, zorder=1)
+        axis.set_xlim(.3, summary + 1.35)
+        axis.set_xticks([1, 6, 12, 18, 24, summary], ['1', '6', '12', '18', '24', 'Overall'])
+        axis.set_xlabel('Held-out actor rank')
+        axis.yaxis.set_major_locator(MaxNLocator(5))
+        axis.tick_params(axis='both', labelsize=6.9)
+    visual.set_ylabel(r'Balanced RPS reduction ($10^{-3}$)')
+    objective.legend(loc='lower center', bbox_to_anchor=(.5, 1.26), ncol=2,
+                     frameon=False, fontsize=7, handlelength=1, handletextpad=.3, columnspacing=.9)
     export(fig, output)
 
 
@@ -1112,9 +1134,39 @@ def plot_gap_location(root, output, alignment_script, layout_report):
                  ('resampling', 'All locations'),
                  ('worst_start', 'Worst location'))
     stages = (('anchor', 'Anchor'), ('fusion', 'Fusion'), ('interaction', 'Interaction'))
-    figure, axes = plt.subplots(1, 2, figsize=(6.5, 2.24), sharex=True)
-    figure.subplots_adjust(left=.182, right=.983, bottom=.245, top=.758, wspace=.48)
-    effects, components = axes
+    figure = plt.figure(figsize=(6.5, 3.75))
+    grid = figure.add_gridspec(2, 2, left=.164, right=.982, bottom=.130, top=.916,
+                               wspace=.45, hspace=.82, height_ratios=(1.10, 1.))
+    with np.load(root / 'audiovisual_example.npz', allow_pickle=False) as clip:
+        native, assigned_short, assigned_long = clip['masks'][:3, 1]
+    bins = np.arange(len(native))
+    observed = np.flatnonzero(native)
+    span = observed[-1] - observed[0] + 1
+    for column, (width, assigned) in enumerate(zip((.35, .65), (assigned_short, assigned_long), strict=True)):
+        axis = figure.add_subplot(grid[0, column])
+        count = max(1, round(span * width))
+        starts = np.arange(observed[0], observed[-1] - count + 2)
+        gaps = (bins >= starts[:, None]) & (bins < (starts + count)[:, None])
+        saved, = np.flatnonzero(((native & ~gaps) == assigned).all(axis=1))
+        axis.imshow(gaps, aspect='auto', interpolation='none',
+                    cmap=ListedColormap([GRID, '#8095BC']), vmin=0, vmax=1)
+        axis.add_patch(Rectangle((-.5, saved - .5), len(bins), 1., facecolor='none',
+                                 edgecolor=INDIGO, linewidth=1.0, clip_on=False, zorder=3))
+        axis.set_title('ab'[column], loc='left', fontweight='bold', pad=6)
+        axis.text(.5, 1.045, f'{width:.0%} visual gap', transform=axis.transAxes,
+                  ha='center', va='bottom', fontsize=8)
+        axis.set_xticks([0, 5, 11, 17, 23], [1, 6, 12, 18, 24])
+        ticks = np.unique([0, len(starts) // 2, len(starts) - 1])
+        axis.set_yticks(ticks, starts[ticks] + 1)
+        axis.set_xlabel('Visual bin', labelpad=2)
+        if column == 0:
+            axis.set_ylabel('Gap start (bin)', labelpad=3)
+        axis.spines[['left', 'bottom']].set_visible(False)
+        axis.tick_params(length=0, pad=2.6, labelsize=7.1)
+
+    effects = figure.add_subplot(grid[1, 0])
+    components = figure.add_subplot(grid[1, 1], sharex=effects)
+    axes = (effects, components)
     rows = (2., 1., 0.)
     limits = [0.]
     for cohort, _, color, marker, offset in cohorts:
@@ -1126,8 +1178,7 @@ def plot_gap_location(root, output, alignment_script, layout_report):
                 limits.extend(bounds)
                 interval(axis, value['reduction'] * 1000, bounds, y + offset, color, marker)
     margin = np.ptp(limits) * .085
-    for axis, choices, title in zip(axes, (protocols, stages), ('a  Evaluation locations', 'b  Training stages'),
-                                    strict=True):
+    for axis, choices, letter in zip(axes, (protocols, stages), 'cd', strict=True):
         axis.axvline(0, color='black', linewidth=.75, linestyle=(0, (3, 3)), zorder=1)
         axis.spines['left'].set_visible(False)
         axis.set_yticks(rows, [label for _, label in choices])
@@ -1136,10 +1187,10 @@ def plot_gap_location(root, output, alignment_script, layout_report):
         axis.set_ylim(-.55, 2.55)
         axis.xaxis.set_major_locator(MaxNLocator(5))
         axis.set_xlabel('RPS reduction × 1,000')
-        axis.set_title(title, loc='left', fontweight='bold', fontsize=8.5, pad=7)
+        axis.set_title(letter, loc='left', fontweight='bold', fontsize=8.5, pad=7)
     handles = [Line2D([], [], color=color, marker=marker, markersize=4.2, linestyle='none', label=label)
                for _, label, color, marker, _ in cohorts]
-    figure.legend(handles=handles, loc='upper center', bbox_to_anchor=(.54, .945),
+    figure.legend(handles=handles, loc='upper center', bbox_to_anchor=(.573, .487),
                   ncols=2, frameon=False, borderaxespad=0., columnspacing=2.)
     if alignment_script:
         sys.path.insert(0, str(alignment_script))

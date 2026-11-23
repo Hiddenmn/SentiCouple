@@ -15,7 +15,7 @@ SUPPLEMENT_PLATES = {
     'frozen_targets': (('moud_transfer', 1), ('frozen_dialogue', 1), ('msp_face_transfer', 1)),
     'refit_checks': (('msp_face_refit', 2),),
     'encoder_checks': (('visual_components', 2),),
-    'gap_checks': (('gap_location', 2),),
+    'gap_checks': (('gap_location', 4),),
     'observation_checks': (('dispersion_pooling', 2), ('face_crops', 2), ('audio_channel', 2)),
     'ensemble_checks': (('seed_ensemble', 3),),
     'probability_checks': (('neutral_readout', 2), ('probability_pool', 1)),
@@ -89,8 +89,8 @@ def assemble_plate(output, parts):
         for row in placements:
             letters = row['letters']
             baseline = top + scale * row['baseline_from_top']
-            for column, letter in enumerate(letters):
-                anchor = inset + (width - 2 * inset) * column / len(letters)
+            for letter, offset in zip(letters, row['anchors_from_left'], strict=True):
+                anchor = x + scale * offset
                 label = ET.SubElement(svg, f'{{{SVG}}}text', x=f'{anchor:.5f}', y=f'{baseline:.5f}',
                                       fill='black', attrib={'font-family': 'Arial, sans-serif',
                                                             'font-size': '9', 'font-weight': 'bold'})

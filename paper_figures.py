@@ -73,7 +73,7 @@ def forest_axis(axis, labels, xlabel, limits=None):
 def architecture_flow(axis, visual, visible, audio, audible):
     axis.set(xlim=(0, 1.02), ylim=(0, 1))
     axis.set_axis_off()
-    panel(axis, 'b', y=1.03)
+    panel(axis, 'a', y=1.03)
     box(axis, .103, .824, .174, .235, 'Text + masks', PALE_BLUE)
     for row, label, fill, values, observed in (
         (.500, 'Observed audio bins', PALE_AMBER, audio, audible),
@@ -111,6 +111,7 @@ def architecture_flow(axis, visual, visible, audio, audible):
     arrow(axis, [(.444, .500), (.513, .500)])
     arrow(axis, [(.444, .176), (.482, .176), (.482, .395), (.513, .395)])
     arrow(axis, [(.448, .875), (.764, .875)])
+    axis.text(.600, .905, r'$\ell,\ s_0$', va='bottom', ha='center', fontsize=7.4, color=SLATE)
     arrow(axis, [(.679, .505), (.701, .505), (.701, .706), (.763, .706)], color=INDIGO)
     axis.plot([.679, .725], [.386, .386], color=MAGENTA, linewidth=.95)
     arrow(axis, [(.725, .386), (.725, .575), (.763, .575)], color=MAGENTA)
@@ -172,12 +173,13 @@ def model_trace(runs):
     with np.load(runs / 'paper_example.npz', allow_pickle=False) as packet:
         data = dict(packet)
     with np.load(runs / 'audiovisual_example.npz', allow_pickle=False) as packet:
-        audio, audible = packet['audio'], packet['masks'][1, 0]
+        audio, visual = packet['audio'], packet['vision']
+        audible, visible = packet['masks'][1]
     figure = plt.figure(figsize=(6.75, 5.70))
     grid = figure.add_gridspec(3, 19, left=.126, right=.972, top=.916, bottom=.181,
-                              height_ratios=(.74, 1.13, 1.63), hspace=.34, wspace=0)
-    frames = figure.add_subplot(grid[0, :])
-    architecture = figure.add_subplot(grid[1, :])
+                              height_ratios=(1.13, .74, 1.63), hspace=.42, wspace=0)
+    architecture = figure.add_subplot(grid[0, :])
+    frames = figure.add_subplot(grid[1, :])
     observations, shifts, probabilities, intensity = (figure.add_subplot(grid[2, span]) for span in
                                                        (slice(0, 5), slice(6, 9), slice(10, 14), slice(15, 19)))
     rows = np.arange(len(VIEWS))[::-1]
@@ -252,17 +254,17 @@ def model_trace(runs):
 
     figure.canvas.draw()
     label_edge = left_of_y_labels(observations)
-    for axis in (frames, architecture):
+    for axis, lift in ((frames, .025), (architecture, 0)):
         position = axis.get_position()
-        axis.set_position(Bbox.from_extents(label_edge, position.y0, position.x1, position.y1))
+        axis.set_position(Bbox.from_extents(label_edge, position.y0 + lift, position.x1, position.y1 + lift))
     for axis, letter in zip(traces, 'cdef', strict=True):
         position = axis.get_position()
         label_x = (label_edge - position.x0) / position.width if axis is observations else 0
         panel(axis, letter, x=label_x)
 
     top = filmstrip(frames, data['frames'], data['frame_slots'])
-    frames.text(.073, top + .12, f'“{data["transcript"].item()}”', transform=frames.transAxes,
-                ha='left', va='bottom', fontsize=8.6, color=INK)
+    frames.text(.5, top + .12, f'“{data["transcript"].item()}”', transform=frames.transAxes,
+                ha='center', va='bottom', fontsize=8.6, color=INK)
     for number in data['frame_slots'] + 1:
         frames.text(number - .5, -.032, str(number), ha='center', va='top', fontsize=7.1,
                     color=SLATE, clip_on=False)
@@ -271,8 +273,8 @@ def model_trace(runs):
                                edgecolor=MAGENTA, linewidth=.6, clip_on=False))
     frames.text(hidden.mean() + .5, -.29, VIEWS[1], ha='center', va='top',
                 fontsize=7.25, color=MAGENTA, clip_on=False)
-    panel(frames, 'a', y=top + .105)
-    architecture_flow(architecture, data['visual'], data['masks'][1], audio, audible)
+    panel(frames, 'b', y=top + .105)
+    architecture_flow(architecture, visual, visible, audio, audible)
     return figure
 
 
@@ -409,6 +411,10 @@ def within_polarity_evidence(runs):
         axis.vlines(np.arange(.5, 7.5), -.5, 2.5, color='white', linewidth=.85)
         axis.hlines([.5, 1.5], -.5, 7.5, color='white', linewidth=.95)
         axis.spines[['left', 'bottom']].set_visible(False)
+        if column == 1:
+            example, = [slot for slot, index in enumerate(subset) if int(ids[index].rsplit('$_$', 1)[-1]) == 14]
+            axis.add_patch(Rectangle((example - .48, .52), .96, 1.96, facecolor='none',
+                                     edgecolor=INDIGO, linewidth=1.0, zorder=3))
         for slot, value in enumerate(scores[subset]):
             axis.text(slot, 0, f'{value:.1f}'.replace('-', '−'), ha='center', va='center',
                       color=INK, fontsize=7.0)

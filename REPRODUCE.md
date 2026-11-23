@@ -149,7 +149,7 @@ The CH-SIMS v2 modality figure uses the paired forecasts in `runs/sims_v2_shared
 python audiovisual_example.py --run runs/sims_v2_shared_score_seed97 --streams-run runs/sims_v2_streams_seed97 --features CH_SIMS_V2_FEATURES --output runs/audiovisual_example.npz --english-transcript "How much longer do we have to stay in this lousy place?"
 ```
 
-The packet retains the original transcript and its displayed translation. Its acoustic channels also supply the audio strip in the full architecture. The aggregate modality table uses the two CH-SIMS v2 ablation reports and the recorded forecasts at each gap width from seeds 97, 17, and 521.
+The packet retains the original transcript and its displayed translation. Its acoustic and visual channels also supply the feature strips in the full architecture. The aggregate modality table uses the two CH-SIMS v2 ablation reports and the recorded forecasts at each gap width from seeds 97, 17, and 521.
 
 To rebuild the video examples, use the CREMA-D checkout at the revision linked above and the 24-bin feature packet from `prepare_cremad.py`. Pass their local paths in place of `RELEASE_DIR` and `CREMAD_FEATURES`.
 
