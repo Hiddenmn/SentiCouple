@@ -22,7 +22,7 @@ SUPPLEMENT_PLATES = {
     'probability_checks': (('neutral_readout', 2), ('probability_pool', 1)),
     'view_checks': (('view_stability', 2),),
     'weighting_checks': (('class_weighting', 2),),
-    'modality_checks': (('module_effects', 2),),
+    'modality_checks': (('audiovisual_example', 1), ('module_effects', 2)),
     'intensity_signal_checks': (('modality_agreement', 1), ('seed_sensitivity', 2), ('frozen_lnln_heads', 2)),
     'calibration_checks': (('marginal_tilt', 2), ('intensity_calibration', 2)),
 }

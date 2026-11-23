@@ -8,6 +8,7 @@ import sys
 
 from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+from matplotlib.font_manager import FontProperties, fontManager
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, PathPatch, Rectangle
@@ -32,6 +33,7 @@ GRID = '#E4E9EE'
 PALE_BLUE = '#EDF1FA'
 PALE_TEAL = '#E8F3F0'
 PALE_PINK = '#F7ECF0'
+PALE_AMBER = '#FCF2E5'
 POLARITY = ('Negative', 'Neutral', 'Positive')
 CLASS_COLORS = (MAGENTA, INDIGO, TEAL)
 VIEWS = ('Full', '35% gap', '65% gap', 'No vision')
@@ -67,20 +69,25 @@ def forest_axis(axis, labels, xlabel, limits=None):
 def architecture_flow(axis, visual, visible):
     axis.set(xlim=(0, 1.02), ylim=(0, 1))
     axis.set_axis_off()
-    panel(axis, 'b', y=1.065)
-    box(axis, .103, .741, .174, .295, 'Statement ID\n+ masks', PALE_BLUE)
-    box(axis, .103, .253, .174, .295, '', PALE_TEAL)
-    axis.text(.103, .320, 'Observed CLIP bins', ha='center', va='center', fontsize=7.45)
+    panel(axis, 'b', y=1.03)
+    box(axis, .103, .824, .174, .235, 'Text + masks', PALE_BLUE)
+    box(axis, .103, .500, .174, .235, 'Audio bins', PALE_AMBER)
+    box(axis, .103, .176, .174, .235, '', PALE_TEAL)
+    axis.text(.103, .228, 'Observed visual bins', ha='center', va='center', fontsize=7.4)
     features = normalized_channels(visual)
     sample = np.ma.array(features, mask=np.broadcast_to(~visible, features.shape))
-    axis.imshow(sample, extent=(.034, .172, .139, .244), cmap=CHANNELS.with_extremes(bad='#F9FAFB'),
+    axis.imshow(sample, extent=(.034, .172, .084, .167), cmap=CHANNELS.with_extremes(bad='#F9FAFB'),
                 vmin=-2, vmax=2, aspect='auto', interpolation='none', zorder=3)
-    axis.add_patch(Rectangle((.034, .139), .138, .105, facecolor='none',
+    axis.add_patch(Rectangle((.034, .084), .138, .083, facecolor='none',
                              edgecolor='#8D9CA8', linewidth=.45, zorder=4))
-    box(axis, .337, .741, .211, .295, 'Text anchor\n' + r'$\ell,\ s_0$', PALE_BLUE)
-    box(axis, .337, .253, .211, .295, 'Visual encoder\nMean + max', PALE_TEAL)
-    box(axis, .585, .253, .170, .295, 'Fusion update\n' + r'$\delta,\ \nu$', PALE_PINK)
-    axis.add_patch(Rectangle((.763, .062), .253, .826, facecolor='white', edgecolor='black', linewidth=.75))
+    box(axis, .337, .824, .211, .235, 'Text anchor\n' + r'$\ell,\ s_0$', PALE_BLUE)
+    box(axis, .337, .500, .211, .235, 'Audio encoder\nMean + max', PALE_AMBER)
+    box(axis, .337, .176, .211, .235, 'Visual encoder\nMean + max', PALE_TEAL)
+    box(axis, .597, .500, .162, .346, '', PALE_PINK)
+    axis.text(.597, .617, 'Fusion update', ha='center', va='center', fontsize=8.2)
+    axis.text(.597, .523, r'$\nu$', color=INDIGO, ha='center', va='center', fontsize=10.4)
+    axis.text(.597, .415, r'$\delta$', color=MAGENTA, ha='center', va='center', fontsize=10.4)
+    axis.add_patch(Rectangle((.763, .057), .253, .862, facecolor='white', edgecolor='black', linewidth=.75))
     axis.plot([.763, 1.016], [.489, .489], color='black', linewidth=.6)
     axis.text(.889, .75, 'Polarity', ha='center', va='center', fontsize=8.35, weight='bold')
     axis.text(.889, .608, r'$\mathrm{softmax}(\ell+[-\delta,\nu,\delta])$',
@@ -88,15 +95,17 @@ def architecture_flow(axis, visual, visible):
     axis.text(.889, .352, 'Intensity', ha='center', va='center', fontsize=8.35, weight='bold')
     axis.text(.889, .192, r'$c\,\tanh(\operatorname{arctanh}(s_0)+\alpha\delta)$',
               ha='center', va='center', fontsize=7.85)
-    arrow(axis, [(.196, .741), (.224, .741)])
-    arrow(axis, [(.196, .253), (.224, .253)])
-    arrow(axis, [(.45, .253), (.495, .253)])
-    arrow(axis, [(.337, .587), (.337, .495), (.585, .495), (.585, .413)])
-    axis.plot([.45, .713, .713], [.741, .741, .505], color=INDIGO, linewidth=.88)
-    axis.plot([.676, .713, .713], [.253, .253, .505], color=MAGENTA, linewidth=.88)
-    arrow(axis, [(.713, .505), (.737, .505), (.737, .702), (.763, .702)])
-    arrow(axis, [(.713, .505), (.737, .505), (.737, .278), (.763, .278)])
-    axis.scatter([.713], [.505], s=8, color=INK, zorder=4)
+    for row in (.824, .500, .176):
+        arrow(axis, [(.193, row), (.229, row)])
+    arrow(axis, [(.444, .790), (.482, .790), (.482, .605), (.513, .605)])
+    arrow(axis, [(.444, .500), (.513, .500)])
+    arrow(axis, [(.444, .176), (.482, .176), (.482, .395), (.513, .395)])
+    arrow(axis, [(.444, .875), (.695, .875), (.695, .957), (.887, .957), (.887, .919)])
+    arrow(axis, [(.679, .523), (.701, .523), (.701, .706), (.763, .706)], color=INDIGO)
+    axis.plot([.679, .725], [.415, .415], color=MAGENTA, linewidth=.95)
+    arrow(axis, [(.725, .415), (.725, .575), (.763, .575)], color=MAGENTA)
+    arrow(axis, [(.725, .415), (.725, .305), (.763, .305)], color=MAGENTA)
+    axis.scatter([.725], [.415], s=7, color=MAGENTA, zorder=4)
 
 
 def filmstrip(axis, frames, slots):
@@ -152,9 +161,9 @@ def probability_stack(axis, row, prediction, alpha):
 def model_trace(runs):
     with np.load(runs / 'paper_example.npz', allow_pickle=False) as packet:
         data = dict(packet)
-    figure = plt.figure(figsize=(6.75, 5.49))
+    figure = plt.figure(figsize=(6.75, 5.62))
     grid = figure.add_gridspec(3, 19, left=.126, right=.972, top=.916, bottom=.181,
-                              height_ratios=(.74, .87, 1.55), hspace=.44, wspace=0)
+                              height_ratios=(.74, 1.13, 1.55), hspace=.40, wspace=0)
     frames = figure.add_subplot(grid[0, :])
     top = filmstrip(frames, data['frames'], data['frame_slots'])
     frames.text(.073, top + .12, f'“{data["transcript"].item()}”', transform=frames.transAxes,
@@ -583,8 +592,49 @@ def transfer_evidence(runs):
     return figure
 
 
+def plot_audiovisual_example(runs, output):
+    with np.load(runs / 'audiovisual_example.npz', allow_pickle=False) as packet:
+        clip = dict(packet)
+    figure, (features, predictions) = plt.subplots(1, 2, figsize=(6.55, 1.73),
+                                                   gridspec_kw={'width_ratios': (1.27, 1.)})
+    figure.subplots_adjust(left=.122, right=.975, top=.78, bottom=.225, wspace=.41)
+    view = 1
+    for row, name, mask in zip((1, 0), ('audio', 'vision'), clip['masks'][view], strict=True):
+        feature_strip(features, normalized_channels(clip[name]), mask, row, height=.72)
+    features.set(xlim=(0, 24), ylim=(-.49, 1.49), xlabel='Time bin',
+                 xticks=(.5, 11.5, 23.5), xticklabels=('1', '12', '24'))
+    features.set_yticks((1, 0), ('Audio', 'Vision'))
+    features.tick_params(axis='y', length=0, pad=4)
+    features.spines['left'].set_visible(False)
+    available = {font.name for font in fontManager.ttflist}
+    preferred = ('Microsoft YaHei', 'Noto Sans CJK SC', 'SimHei')
+    family = next((name for name in preferred if name in available), None)
+    if family is None:
+        raise ValueError('Install a Chinese font such as Noto Sans CJK SC to render the original transcript.')
+    font = FontProperties(family=family, size=8.6)
+    features.text(.105, 1.13, clip['transcript'].item(), transform=features.transAxes,
+                  fontproperties=font, va='bottom', color=INK)
+    panel(features, 'a', y=1.12)
+
+    polarity = int(clip['polarity'])
+    for row, estimate, alpha in ((1, clip['anchor'][view], .38), (0, clip['fused'][view], 1.)):
+        left = np.r_[0., estimate.cumsum()[:-1]]
+        predictions.barh(row, estimate, left=left, height=.59, color=CLASS_COLORS,
+                         alpha=alpha, edgecolor='none')
+        value = estimate[polarity]
+        predictions.text(left[polarity] + value / 2, row, f'{value:.1%}',
+                         color=INK if row == 1 else 'white', ha='center', va='center', fontsize=7.5)
+    predictions.set(xlim=(0, 1), ylim=(-.49, 1.49), xlabel='Class probability',
+                    xticks=(0, .5, 1))
+    predictions.set_yticks((1, 0), ('Text anchor', 'Fusion'))
+    predictions.tick_params(axis='y', length=0, pad=4)
+    predictions.spines['left'].set_visible(False)
+    export(figure, output)
+
+
 def supplementary(runs, output, alignment_script, report_directory):
     single_argument = {
+        'audiovisual_example': plot_audiovisual_example,
         'fixed_transcripts': supporting.plot_fixed_transcripts,
         'frozen_dialogue': supporting.plot_frozen_dialogue,
         'frozen_lnln_heads': supporting.plot_frozen_lnln_heads,
