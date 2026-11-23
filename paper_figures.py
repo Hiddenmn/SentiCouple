@@ -1,0 +1,654 @@
+"""Draw the manuscript figures from the released prediction packets."""
+
+import argparse
+from functools import partial
+import json
+from pathlib import Path
+import sys
+
+from matplotlib.collections import LineCollection
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch, PathPatch, Rectangle
+from matplotlib.path import Path as ArtistPath
+from matplotlib.ticker import MaxNLocator
+from matplotlib.transforms import Bbox
+import numpy as np
+from tempfile import TemporaryDirectory
+
+import plot_ablation as supporting
+from figure_plates import SUPPLEMENT_PLATES, assemble_plate, plate_parts
+from plot_ablation import configure_figure, export
+from plot_model import arrow, box
+
+
+TEAL = '#007F83'
+MAGENTA = '#AD3567'
+INDIGO = '#303D78'
+INK = '#222833'
+SLATE = '#647082'
+GRID = '#E4E9EE'
+PALE_BLUE = '#EDF1FA'
+PALE_TEAL = '#E8F3F0'
+PALE_PINK = '#F7ECF0'
+POLARITY = ('Negative', 'Neutral', 'Positive')
+CLASS_COLORS = (MAGENTA, INDIGO, TEAL)
+VIEWS = ('Full', '35% gap', '65% gap', 'No vision')
+CHANNELS = LinearSegmentedColormap.from_list('clip_channels', (INDIGO, 'white', TEAL))
+CHANGE = LinearSegmentedColormap.from_list('paired_change', (MAGENTA, '#F9F9F9', TEAL))
+
+
+def report(runs, name):
+    return json.loads((runs / f'{name}.json').read_text(encoding='utf-8'))
+
+
+def panel(axis, letter, x=0, y=1.045):
+    axis.text(x, y, letter, transform=axis.transAxes, ha='left', va='bottom',
+              fontweight='bold', fontsize=10, clip_on=False, color='black')
+
+
+def forest_axis(axis, labels, xlabel, limits=None):
+    axis.set_axisbelow(True)
+    axis.grid(axis='y', color=GRID, linewidth=.45)
+    axis.axvline(0, color=SLATE, linewidth=.72, linestyle=(0, (3, 3)), zorder=1)
+    axis.spines['left'].set_visible(False)
+    axis.set_yticks(np.arange(len(labels))[::-1], labels)
+    axis.tick_params(axis='y', length=0, pad=5)
+    axis.set_ylim(-.62, len(labels) - .38)
+    axis.set_xlabel(xlabel, labelpad=3)
+    axis.xaxis.set_major_locator(MaxNLocator(5))
+    if limits:
+        axis.set_xlim(*limits)
+    else:
+        axis.margins(x=.11)
+
+
+def architecture_flow(axis, visual, visible):
+    axis.set(xlim=(0, 1.02), ylim=(0, 1))
+    axis.set_axis_off()
+    panel(axis, 'b', y=1.065)
+    box(axis, .103, .741, .174, .295, 'Statement ID\n+ masks', PALE_BLUE)
+    box(axis, .103, .253, .174, .295, '', PALE_TEAL)
+    axis.text(.103, .344, 'Observed CLIP bins', ha='center', va='center', fontsize=7.45)
+    features = normalized_channels(visual)
+    sample = np.ma.array(features, mask=np.broadcast_to(~visible, features.shape))
+    axis.imshow(sample, extent=(.034, .172, .143, .273), cmap=CHANNELS.with_extremes(bad='#F9FAFB'),
+                vmin=-2, vmax=2, aspect='auto', interpolation='none', zorder=3)
+    axis.add_patch(Rectangle((.034, .143), .138, .130, facecolor='none',
+                             edgecolor='#8D9CA8', linewidth=.45, zorder=4))
+    box(axis, .337, .741, .211, .295, 'Text anchor\n' + r'$\ell,\ s_0$', PALE_BLUE)
+    box(axis, .337, .253, .211, .295, 'Visual encoder\nMean + max', PALE_TEAL)
+    box(axis, .585, .253, .170, .295, 'Fusion update\n' + r'$\delta,\ \nu$', PALE_PINK)
+    axis.add_patch(Rectangle((.763, .062), .253, .826, facecolor='white', edgecolor='black', linewidth=.75))
+    axis.plot([.763, 1.016], [.489, .489], color='black', linewidth=.6)
+    axis.text(.889, .75, 'Polarity', ha='center', va='center', fontsize=8.35, weight='bold')
+    axis.text(.889, .608, r'$\mathrm{softmax}(\ell+[-\delta,\nu,\delta])$',
+              ha='center', va='center', fontsize=8.0)
+    axis.text(.889, .352, 'Intensity', ha='center', va='center', fontsize=8.35, weight='bold')
+    axis.text(.889, .192, r'$c\,\tanh(\operatorname{arctanh}(s_0)+\alpha\delta)$',
+              ha='center', va='center', fontsize=7.85)
+    arrow(axis, [(.196, .741), (.224, .741)])
+    arrow(axis, [(.196, .253), (.224, .253)])
+    arrow(axis, [(.45, .253), (.495, .253)])
+    arrow(axis, [(.337, .587), (.337, .495), (.585, .495), (.585, .413)])
+    axis.plot([.45, .713, .713], [.741, .741, .505], color=INDIGO, linewidth=.88)
+    axis.plot([.676, .713, .713], [.253, .253, .505], color=MAGENTA, linewidth=.88)
+    arrow(axis, [(.713, .505), (.737, .505), (.737, .702), (.763, .702)])
+    arrow(axis, [(.713, .505), (.737, .505), (.737, .278), (.763, .278)])
+    axis.scatter([.713], [.505], s=8, color=INK, zorder=4)
+
+
+def filmstrip(axis, frames, slots):
+    axis.set(xlim=(0, 24), ylim=(0, 1))
+    axis.set_axis_off()
+    width_inches, height_inches = axis.figure.get_size_inches()
+    box_size = axis.get_position()
+    points_per_bin = width_inches * box_size.width / 24
+    image_height, image_width = frames.shape[1:3]
+    height_per_bin = points_per_bin * image_height / image_width / (height_inches * box_size.height)
+    edge_limit = 2 * min(slots[0] + .5, 23.5 - slots[-1]) - .08
+    width = min(round(24 / len(slots) * .907, 2), .84 / height_per_bin, edge_limit)
+    height = width * height_per_bin
+    lower = .08
+    for bin_index, frame in zip(slots, frames, strict=True):
+        center = bin_index + .5
+        left, right = center - width / 2, center + width / 2
+        axis.imshow(frame, extent=(left, right, lower, lower + height), interpolation='antialiased',
+                    aspect='auto', zorder=1)
+        axis.add_patch(Rectangle((left, lower), width, height, facecolor='none', edgecolor=INK,
+                                 linewidth=.5, zorder=2))
+        axis.plot([center, center], [0, lower], color='black', linewidth=.5, zorder=3)
+    return lower + height
+
+
+def normalized_channels(values):
+    return (values - values.mean(1, keepdims=True)) / values.std(1, keepdims=True).clip(1e-6)
+
+
+def feature_strip(axis, features, visible, center, height=.59):
+    bottom = center - height / 2
+    observed = np.ma.array(features, mask=np.broadcast_to(~visible, features.shape))
+    image = axis.imshow(observed, extent=(0, len(visible), bottom, bottom + height), cmap=CHANNELS,
+                        vmin=-2, vmax=2, aspect='auto', interpolation='none', zorder=1)
+    edges = np.diff(np.r_[False, ~visible, False].astype(int))
+    for start, end in zip(np.flatnonzero(edges > 0), np.flatnonzero(edges < 0), strict=True):
+        axis.add_patch(Rectangle((start, bottom), end - start, height, facecolor='#F1F3F5',
+                                 edgecolor='#9DA7B3', linewidth=.48, zorder=2))
+        lines = []
+        for origin in np.arange(start - 1.8, end, 1.40):
+            left, right = max(start, origin), min(end, origin + 2.)
+            lines.append([(left, bottom + height * (left - origin) / 2),
+                          (right, bottom + height * (right - origin) / 2)])
+        axis.add_collection(LineCollection(lines, colors='#A8B3BE', linewidths=.48, zorder=3))
+    return image
+
+
+def probability_stack(axis, row, prediction, alpha):
+    axis.barh(row, prediction, left=np.r_[0., np.cumsum(prediction[:-1])], height=.205,
+              color=CLASS_COLORS, edgecolor='white', linewidth=.45, alpha=alpha, zorder=2)
+
+
+def model_trace(runs):
+    with np.load(runs / 'paper_example.npz', allow_pickle=False) as packet:
+        data = dict(packet)
+    figure = plt.figure(figsize=(6.75, 5.49))
+    grid = figure.add_gridspec(3, 19, left=.126, right=.972, top=.916, bottom=.181,
+                              height_ratios=(.74, .87, 1.55), hspace=.44, wspace=0)
+    frames = figure.add_subplot(grid[0, :])
+    top = filmstrip(frames, data['frames'], data['frame_slots'])
+    frames.text(.073, top + .12, f'“{data["transcript"].item()}”', transform=frames.transAxes,
+                ha='left', va='bottom', fontsize=8.6, color=INK)
+    for number in data['frame_slots'] + 1:
+        frames.text(number - .5, -.032, str(number), ha='center', va='top', fontsize=7.1,
+                    color=SLATE, clip_on=False)
+    hidden = np.flatnonzero(~data['masks'][1])
+    frames.add_patch(Rectangle((hidden[0], -.247), len(hidden), .093, facecolor='#F0D5DF',
+                               edgecolor=MAGENTA, linewidth=.6, clip_on=False))
+    frames.text(hidden.mean() + .5, -.29, VIEWS[1], ha='center', va='top',
+                fontsize=7.25, color=MAGENTA, clip_on=False)
+    panel(frames, 'a', y=top + .105)
+    architecture_flow(figure.add_subplot(grid[1, :]), data['visual'], data['masks'][1])
+
+    observations, shifts, probabilities, intensity = (figure.add_subplot(grid[2, span]) for span in
+                                                       (slice(0, 5), slice(6, 9), slice(10, 14), slice(15, 19)))
+    rows = np.arange(len(VIEWS))[::-1]
+    channels = normalized_channels(data['visual'])
+    for i, row in enumerate(rows):
+        image = feature_strip(observations, channels, data['masks'][i], row)
+        shifts.barh(row + .13, data['signed'][i], height=.205, color=MAGENTA, zorder=2)
+        shifts.barh(row - .13, data['neutral'][i], height=.205, color=INDIGO, zorder=2)
+        probability_stack(probabilities, row + .143, data['anchor'][i], .39)
+        probability_stack(probabilities, row - .143, data['fused'][i], 1.0)
+        before, after = data['anchor_score'][i], data['fused_score'][i]
+        intensity.hlines(row, before, after, color=TEAL, linewidth=1.05, zorder=2)
+        intensity.vlines(before, row - .18, row + .18, color=SLATE, linewidth=1.2, zorder=3)
+        intensity.vlines(after, row - .113, row + .113, color=TEAL, linewidth=2.0, zorder=4)
+        if i == 1:
+            for axis in (observations, shifts, probabilities, intensity):
+                axis.axhspan(row - .465, row + .465, facecolor=PALE_PINK, zorder=0)
+            polarity = int(data['polarity'])
+            for y, prediction, color in ((row + .143, data['anchor'][i], INK),
+                                         (row - .143, data['fused'][i], 'white')):
+                left = prediction[:polarity].sum()
+                probability = prediction[polarity]
+                probabilities.text(left + probability / 2, y, f'{probability:.1%}',
+                                   color=color, ha='center', va='center', fontsize=6.35)
+            intensity.text(before, row + .235, f'{before:.3f}'.replace('-', '−'), color=SLATE,
+                           va='bottom', ha='center', fontsize=6.6)
+            intensity.text(after, row - .195, f'{after:.3f}'.replace('-', '−'), color=TEAL,
+                           va='top', ha='center', fontsize=6.6)
+    shifts.axvline(0, color=SLATE, linewidth=.65, zorder=1)
+    intensity.axvline(float(data['target']), color=SLATE, linewidth=.75, linestyle=(0, (3, 3)), zorder=1)
+    observations.set_xticks([.5, 11.5, 23.5], ['1', '12', '24'])
+    observations.set_xlim(0, 24)
+    shifts.set_xlim(min(data['signed'].min(), data['neutral'].min()) - .08, .12)
+    shifts.set_xticks([-1, -.5, 0])
+    probabilities.set_xlim(0, 1)
+    probabilities.set_xticks([0, .5, 1])
+    intensity.set_xlim(min(data['fused_score'].min(), data['anchor_score'].min()) - .05, .02)
+    intensity.set_xticks([-.6, -.3, 0])
+    for axis, letter, label in zip((observations, shifts, probabilities, intensity), 'cdef',
+                                   ('CLIP time bin', 'Logit update', 'Class probability', 'Signed intensity'), strict=True):
+        axis.set_ylim(-.50, len(rows) - .50)
+        axis.set_yticks(rows, VIEWS if axis is observations else [''] * len(rows))
+        axis.tick_params(axis='y', length=0, pad=4)
+        axis.tick_params(axis='x', length=2.6, pad=2.5)
+        axis.spines['left'].set_visible(False)
+        axis.set_xlabel(label, labelpad=3.5)
+        for boundary in [.5, 1.5, 2.5]:
+            axis.axhline(boundary, color=GRID, linewidth=.55, zorder=0)
+        panel(axis, letter, y=1.045)
+
+    probabilities.set_xlabel('Class probability\nAnchor above fusion', labelpad=3.5)
+    intensity.set_xlabel(f'Signed intensity\nAudience {float(data["target"]):.3f}'.replace('-', '−'),
+                         labelpad=3.5)
+    key = observations.inset_axes([.09, -.34, .80, .034])
+    scale = figure.colorbar(image, cax=key, orientation='horizontal', ticks=[-2, 0, 2])
+    scale.outline.set_visible(False)
+    scale.ax.tick_params(labelsize=7, length=2, pad=1)
+    scale.set_label('Feature z score', labelpad=1, size=7.3)
+    legend = [Line2D([], [], color=color, lw=3.0, label=label)
+              for color, label in zip(CLASS_COLORS, POLARITY, strict=True)]
+    probabilities.legend(handles=legend, loc='upper center', bbox_to_anchor=(1.10, -.34), frameon=False,
+                         ncol=3, columnspacing=.70, handletextpad=.33, handlelength=1.05,
+                         borderpad=0, fontsize=7.1)
+    shifts.legend(handles=[Patch(facecolor=MAGENTA, label=r'$\delta$'), Patch(facecolor=INDIGO, label=r'$\nu$')],
+                  loc='upper center', bbox_to_anchor=(.48, -.34), ncol=2, frameon=False,
+                  handletextpad=.36, handlelength=1.0, columnspacing=.8, fontsize=7.5, borderpad=0)
+    return figure
+
+
+def statement_predictions(axis, runs):
+    with np.load(runs / 'statement_examples.npz', allow_pickle=False) as packet:
+        frames = packet['frames'][:, 1]
+        labels = packet['labels']
+        anchor = packet['anchor'].mean(0)
+        fused = packet['fused'].mean(0)
+        statement = packet['statement'].item()
+    axis.set(xlim=(0, 3), ylim=(0, 1))
+    axis.set_axis_off()
+    bounds = axis.get_position()
+    panel_height = bounds.height * axis.figure.get_figheight()
+    column_width = bounds.width * axis.figure.get_figwidth() / 3
+    frame_width = min(.88, .78 * panel_height / column_width * frames.shape[2] / frames.shape[1])
+    frame_height = frame_width * column_width * frames.shape[1] / frames.shape[2] / panel_height
+    frame_bottom = 1. - frame_height
+    axis.text(1.5, 1.05, f'“{statement}”', va='bottom', ha='center', fontsize=8.8)
+    for column, (frame, label) in enumerate(zip(frames, labels, strict=True)):
+        center = column + .5
+        left = center - frame_width / 2
+        axis.imshow(frame, extent=(left, left + frame_width, frame_bottom, 1.),
+                    aspect='auto', interpolation='antialiased')
+        for y, prediction, alpha in ((frame_bottom - .034, anchor[column], .38),
+                                     (frame_bottom - .102, fused[column], 1.)):
+            for width, start, color in zip(prediction, np.r_[0., prediction.cumsum()[:-1]], CLASS_COLORS, strict=True):
+                axis.add_patch(Rectangle((left + frame_width * start, y - .047), frame_width * width, .047,
+                                         facecolor=color, edgecolor='white', linewidth=.35, alpha=alpha))
+        before = 100 * anchor[column, label]
+        after = 100 * fused[column, label]
+        axis.text(center, frame_bottom - .173, f'{POLARITY[label]}  {before:.1f}% → {after:.1f}%',
+                  fontsize=7.75, color=CLASS_COLORS[label], fontweight='bold', ha='center', va='top')
+    axis.text(.025, frame_bottom - .060, 'Anchor', fontsize=7., ha='right', va='center')
+    axis.text(.025, frame_bottom - .128, 'Fusion', fontsize=7., ha='right', va='center')
+
+
+def coupling_evidence(runs):
+    c = report(runs, 'sims_v2_compact_visual')['supervision']['versus_independent_rps']
+    r = report(runs, 'ravdess_effects')['primary_shared_versus_independent_balanced_rps']
+    crema = report(runs, 'cremad_effects')
+    figure = plt.figure(figsize=(6.75, 3.87))
+    grid = figure.add_gridspec(2, 2, left=.139, right=.940, bottom=.137, top=.912,
+                              hspace=.18, wspace=.50, width_ratios=(1.12, 1.),
+                              height_ratios=(2.19, 1.))
+    examples = figure.add_subplot(grid[0, :])
+    fits, components = [figure.add_subplot(grid[1, column]) for column in (0, 1)]
+    effects = [c, r, crema['balanced_rps_reductions']['independent_intensity']]
+    per_seed = 1000 * np.asarray([effect['by_seed'] for effect in effects])
+    np.testing.assert_allclose(per_seed.mean(1), 1000 * np.asarray([effect['reduction'] for effect in effects]))
+    confidence = fits.imshow(per_seed, extent=(.5, per_seed.shape[1] + .5, -.5, 2.5), cmap=CHANGE,
+                             norm=TwoSlopeNorm(vcenter=0, vmin=-35, vmax=35), interpolation='none', aspect='auto')
+    fits.vlines(np.arange(1.5, per_seed.shape[1] + .5), -.5, 2.5, color='white', linewidth=.50)
+    fits.hlines([.5, 1.5], .5, per_seed.shape[1] + .5, color='white', linewidth=.65)
+    fits.set_xticks([1, 5, per_seed.shape[1]])
+    fits.set_yticks((2, 1, 0), ('CH-SIMS v2', 'RAVDESS', 'CREMA-D'))
+    fits.tick_params(axis='y', length=0, pad=4)
+    fits.set_xlabel('Paired fit', labelpad=3)
+    fits.spines[['left', 'bottom']].set_visible(False)
+    key = fits.inset_axes([1.026, .14, .026, .72])
+    colorbar = figure.colorbar(confidence, cax=key, ticks=[-35, 0, 35])
+    colorbar.ax.tick_params(length=2, pad=1.6, labelsize=7.25)
+    colorbar.outline.set_visible(False)
+    fits.text(1., 1.060, r'RPS gain ($10^{-3}$)', transform=fits.transAxes,
+              ha='right', va='bottom', fontsize=7.35)
+    class_names = ('negative', 'neutral', 'positive')
+    values = 1000 * np.array([crema['contributions_by_polarity'][p] for p in class_names])
+    for j, (color, offset) in enumerate(((MAGENTA, .15), (INDIGO, -.15))):
+        for row, value in zip((2, 1, 0), values[:, j], strict=True):
+            components.barh(row + offset, value, height=.235, color=color, zorder=2)
+            components.annotate(f'{value:.1f}'.replace('-', '−'), (value, row + offset),
+                                xytext=(2.5 if value >= 0 else -2.5, 0), textcoords='offset points',
+                                color=INK, ha='left' if value >= 0 else 'right', va='center', fontsize=6.8)
+    forest_axis(components, POLARITY, r'RPS component gain ($10^{-3}$)', limits=(-18, 53))
+    statement_predictions(examples, runs)
+    for axis, letter in zip((examples, fits, components), 'abc', strict=True):
+        panel(axis, letter)
+    components.legend(handles=[Patch(color=MAGENTA, label='Signed'), Patch(color=INDIGO, label='Neutral')],
+                      loc='lower right', bbox_to_anchor=(1., 1.080), ncol=2, frameon=False, fontsize=7.35,
+                      handlelength=1, handletextpad=.38, columnspacing=.68, borderpad=0)
+    return figure
+
+
+def within_polarity_evidence(runs):
+    with np.load(runs / 'conditional_intensity_evidence.npz', allow_pickle=False) as data:
+        ids, videos, labels, scores = (data[f'ch_sims_v2__{key}']
+                                      for key in ('ids', 'groups', 'y', 'sentiment'))
+        genuine, permuted = (data[f'ch_sims_v2__conditional_{arm}_signed_shift']
+                             for arm in ('shared', 'shuffled'))
+
+    figure = plt.figure(figsize=(6.70, 2.08))
+    grid = figure.add_gridspec(1, 3, left=.027, right=.973, bottom=.37, top=.835,
+                              wspace=.065, width_ratios=(1., .31, 1.))
+    cases = [figure.add_subplot(grid[0, column]) for column in (0, 2)]
+    bounds = cases[0].get_position()
+    row_labels = ('Human rating', 'Fit on original\nratings', 'Fit on shuffled\nratings')
+    for row, label in enumerate(row_labels):
+        height = bounds.y1 - (row + .5) * bounds.height / len(row_labels)
+        figure.text(.5, height, label, ha='center', va='center', fontsize=7.35)
+    figure.text(.5, .255, 'Clip number within video', ha='center', va='center', fontsize=8)
+    colorbar_axis = figure.add_axes([.335, .144, .33, .050])
+    position = np.arange(8)
+    mean_updates = 2 * np.stack((genuine, permuted)).mean(axis=(1, 2))
+    samples = []
+    for polarity in (0, 2):
+        candidates = []
+        for video in np.unique(videos):
+            subset = np.flatnonzero((videos == video) & (labels == polarity))
+            if len(subset) == 8 and len(np.unique(scores[subset])) >= 3:
+                candidates.append((round(float(np.ptp(scores[subset])), 4), video, subset))
+        candidates.sort(key=lambda candidate: candidate[:2])
+        _, _, sample = candidates[len(candidates) // 2]
+        samples.append(sample[np.lexsort((ids[sample], scores[sample]))])
+    scale = np.ceil(2 * np.max(np.abs(mean_updates[:, np.concatenate(samples)]))) / 2
+    for column, (axis, subset) in enumerate(zip(cases, samples, strict=True)):
+        values = np.vstack((np.full(8, np.nan), mean_updates[:, subset]))
+        image = axis.imshow(values, cmap=CHANGE.with_extremes(bad=GRID), vmin=-scale, vmax=scale,
+                            interpolation='nearest', aspect='auto')
+        panel(axis, 'ab'[column], y=1.12)
+        axis.text(.10, 1.12, POLARITY[(0, 2)[column]], transform=axis.transAxes,
+                  va='bottom', fontsize=8, color=INK)
+        axis.set_xticks(position, [str(int(ids[index].rsplit('$_$', 1)[-1])) for index in subset])
+        axis.set_yticks([])
+        axis.tick_params(axis='both', length=0)
+        axis.vlines(np.arange(.5, 7.5), -.5, 2.5, color='white', linewidth=.85)
+        axis.hlines([.5, 1.5], -.5, 7.5, color='white', linewidth=.95)
+        axis.spines[['left', 'bottom']].set_visible(False)
+        for slot, value in enumerate(scores[subset]):
+            axis.text(slot, 0, f'{value:.1f}'.replace('-', '−'), ha='center', va='center',
+                      color=INK, fontsize=7.0)
+        for row, updates in enumerate(mean_updates[:, subset], start=1):
+            for slot, update in enumerate(updates):
+                rgb = image.cmap(image.norm(update))[:3]
+                brightness = np.dot(rgb, (.2126, .7152, .0722))
+                value = f'{round(float(update), 2) + 0.0:.2f}'.replace('-', '−')
+                axis.text(slot, row, value, ha='center', va='center',
+                          color='white' if brightness < .49 else INK, fontsize=6.6)
+    colorbar = figure.colorbar(image, cax=colorbar_axis, orientation='horizontal', ticks=[-scale, 0, scale])
+    colorbar.set_label('Change in positive-to-negative log odds', size=7.6, labelpad=2)
+    colorbar.ax.tick_params(length=2, pad=1, labelsize=7)
+    colorbar.outline.set_visible(False)
+
+    return figure
+
+
+def plot_gap_locations(figure, grid, runs):
+    with np.load(runs / 'gap_examples.npz', allow_pickle=False) as packet:
+        data = dict(packet)
+    outer = grid.subgridspec(3, 2, height_ratios=(1.43, 1., 1.), hspace=.32, wspace=.16)
+    inputs = outer[0, :].subgridspec(2, 2, height_ratios=(1.28, 1.), hspace=.055, wspace=.21)
+    scored = 100 * (data['intensity'] - data['anchor'])
+    probability_axes, intensity_axes = [], []
+    probability_limits = [0.0]
+    intensity_limits = list(data['sentiment'])
+    for case in range(2):
+        frames = figure.add_subplot(inputs[0, case])
+        top = filmstrip(frames, data['frames'][case], data['frame_slots'])
+        panel(frames, 'ab'[case], y=top + .109)
+        frames.text(.090, top + .109, f'Rated {POLARITY[data["y"][case]].lower()}',
+                    transform=frames.transAxes, va='bottom', fontsize=8, color=INK)
+        frames.text(1., top + .109, f'Audience {data["sentiment"][case]:.2f}'.replace('-', '−'),
+                    transform=frames.transAxes, ha='right', va='bottom', fontsize=7.4, color=SLATE)
+        feature = figure.add_subplot(inputs[1, case])
+        values = normalized_channels(data['visual'][case].T)
+        feature_strip(feature, values, data['masks'][0, case], 2., height=.75)
+        for row, view in ((1, 1), (0, 2)):
+            feature_strip(feature, values, data['masks'][view, case], row, height=.74)
+        feature.set(xlim=(0, 24), ylim=(-.4, 2.41), xticks=[])
+        feature.set_yticks([2, 1, 0], ['Full', '35%', '65%'] if case == 0 else ['', '', ''])
+        feature.spines[['left', 'bottom']].set_visible(False)
+        feature.tick_params(axis='y', length=0, pad=4, labelsize=7.25)
+        probability = figure.add_subplot(outer[1, case])
+        intensity = figure.add_subplot(outer[2, case])
+        probability_axes.append(probability)
+        intensity_axes.append(intensity)
+        probability.axhline(0, color='black', linewidth=.66, zorder=0)
+        intensity.axhline(float(data['sentiment'][case]), color='black', linewidth=.72,
+                         linestyle=(0, (3, 3)), zorder=1)
+        for start, count, width, color, style in zip(data['offsets'], data['counts'], data['widths'],
+                                                     (TEAL, INDIGO), ('-', '--'), strict=True):
+            gap_centers = np.arange(count) + width / 2
+            window = slice(start, start + count)
+            for axis, samples, bounds in (
+                (probability, scored[:, window, case, data['y'][case]], probability_limits),
+                (intensity, data['intensity_score'][:, window, case], intensity_limits),
+            ):
+                low, high = np.quantile(samples, [.25, .75], axis=0)
+                axis.fill_between(gap_centers, low, high, color=color, alpha=.16, linewidth=0, zorder=1)
+                axis.plot(gap_centers, samples.mean(0), color=color, linestyle=style, linewidth=1.21, zorder=3)
+                bounds.extend((low.min(), high.max(), samples.mean(0).min(), samples.mean(0).max()))
+        for axis, letter in ((probability, 'cd'[case]), (intensity, 'ef'[case])):
+            panel(axis, letter, y=1.035)
+            axis.set_xlim(0, 24)
+            axis.set_xticks([.5, 5.5, 11.5, 17.5, 23.5], ['1', '6', '12', '18', '24'])
+            axis.yaxis.set_major_locator(MaxNLocator(3))
+            if case == 0:
+                axis.set_ylabel('Rated-class probability\nchange (pp)' if axis is probability else 'Signed intensity',
+                                labelpad=3)
+            else:
+                axis.tick_params(axis='y', labelleft=False)
+        probability.tick_params(axis='x', labelbottom=False, length=2)
+        intensity.set_xlabel('Gap center (time bin)', labelpad=3.5)
+    for axes, points in ((probability_axes, probability_limits), (intensity_axes, intensity_limits)):
+        low, high = min(points), max(points)
+        padding = (high - low) * .09
+        for axis in axes:
+            axis.set_ylim(low - padding, high + padding)
+    return intensity_axes[0].get_position().y0
+
+
+def robustness_evidence(runs):
+    figure = plt.figure(figsize=(6.75, 4.13))
+    grid = figure.add_gridspec(1, 1, left=.145, right=.976, top=.930, bottom=.156)
+    traces_bottom = plot_gap_locations(figure, grid[0, :], runs)
+    figure.legend(handles=[Line2D([], [], color=TEAL, label='35% gap'),
+                           Line2D([], [], color=INDIGO, ls='--', label='65% gap'),
+                           Line2D([], [], color='black', ls=(0, (3, 3)), label='Audience rating')],
+                  loc='lower center', bbox_to_anchor=(.550, traces_bottom - .151), ncol=3,
+                  frameon=False, fontsize=7.65, handletextpad=.48)
+    return figure
+
+
+def plot_gain_transitions(axis, changes):
+    no_gain = changes <= 0
+    counts = np.bincount(2 * no_gain[0] + no_gain[1], minlength=4).reshape(2, 2)
+    margins = (counts.sum(1), counts.sum(0))
+    axis.set(xlim=(0, 1), ylim=(0, 1))
+    axis.set_axis_off()
+    scale = .69 / counts.sum()
+    colors = (TEAL, MAGENTA)
+    labels = ('Lower RPS', 'No RPS gain')
+    left, right = .225, .775
+    starts = [[.80, .80 - sizes[0] * scale - .055] for sizes in margins]
+    for source in range(len(labels)):
+        for target in range(len(labels)):
+            left_top = starts[0][source] - scale * counts[source, :target].sum()
+            right_top = starts[1][target] - scale * counts[:source, target].sum()
+            count = counts[source, target]
+            height = count * scale
+            coordinates = [(left, left_top), (.431, left_top), (.569, right_top), (right, right_top),
+                           (right, right_top - height), (.569, right_top - height),
+                           (.431, left_top - height), (left, left_top - height), (left, left_top)]
+            operations = [ArtistPath.MOVETO, ArtistPath.CURVE4, ArtistPath.CURVE4, ArtistPath.CURVE4,
+                          ArtistPath.LINETO, ArtistPath.CURVE4, ArtistPath.CURVE4, ArtistPath.CURVE4,
+                          ArtistPath.CLOSEPOLY]
+            axis.add_patch(PathPatch(ArtistPath(coordinates, operations), facecolor=colors[target],
+                                     alpha=.53 if source == target else .25, edgecolor='white', linewidth=.58))
+            if count:
+                axis.text(left + .065, left_top - height / 2, f'{count:,}', ha='center', va='center',
+                          fontsize=7.2, color=INK)
+    for x, dx, name, starts_at, sizes, alignment in (
+        (left, -.022, 'Frozen', starts[0], margins[0], 'right'),
+        (right, .022, 'Refitted', starts[1], margins[1], 'left'),
+    ):
+        axis.text(x, .935, name, ha='center', va='bottom', fontsize=8.1)
+        for start, count, label, color in zip(starts_at, sizes, labels, colors, strict=True):
+            height = scale * count
+            axis.add_patch(Rectangle((x - .009, start - height), .018, height, facecolor=color, edgecolor='none'))
+            axis.text(x + dx, start - height / 2, f'{label} · {count:,}', ha=alignment, va='center',
+                      color=INK, fontsize=7.3)
+
+
+def transfer_evidence(runs):
+    moud = report(runs, 'moud_frozen_transfer_full')
+    meld = report(runs, 'meld_frozen_transfer')
+    frozen = report(runs, 'msp_face_transfer_matched')
+    refit = report(runs, 'msp_face_refit_paired')
+    figure = plt.figure(figsize=(6.75, 3.85))
+    grid = figure.add_gridspec(2, 2, left=.150, right=.894, bottom=.09, top=.882,
+                              hspace=.53, wspace=.49, height_ratios=(1.17, .95))
+    overall, target = figure.add_subplot(grid[0, 0]), figure.add_subplot(grid[0, 1])
+    switching = figure.add_subplot(grid[1, :])
+    for row, source in zip((2, 1, 0), (moud, meld, frozen), strict=True):
+        methods = source['methods']
+        prior = methods['anchor'].get('gapped', methods['anchor'])['rps']
+        shared = methods['intensity'].get('gapped', methods['intensity'])['rps']
+        overall.hlines(row, prior, shared, color=SLATE, linewidth=1.05)
+        overall.vlines(prior, row - .105, row + .105, color=SLATE, linewidth=1.15)
+        overall.vlines(shared, row - .105, row + .105, color=TEAL, linewidth=1.85)
+        overall.annotate(f'{prior:.3f}', (prior, row), xytext=(-3, 0), textcoords='offset points',
+                         color=SLATE, ha='right', va='center', fontsize=7.)
+        overall.annotate(f'{shared:.3f}', (shared, row), xytext=(3, 0), textcoords='offset points',
+                         color=TEAL, ha='left', va='center', fontsize=7.)
+    overall.set_yticks([2, 1, 0], ['MOUD', 'MELD', 'MSP-Face'])
+    overall.set_ylim(-.46, 2.46)
+    overall.set_xlim(.198, .321)
+    overall.set_xlabel('Frozen RPS', labelpad=4)
+    overall.xaxis.set_major_locator(MaxNLocator(5))
+    overall.spines['left'].set_visible(False)
+    overall.tick_params(axis='y', length=0, pad=5)
+    target.axhline(0, color='black', linewidth=.72, linestyle=(0, (3, 3)), zorder=0)
+    for compare, offset, color, style in [('primary', -.04, TEAL, '-'), ('anchor', .04, INDIGO, '--')]:
+        estimates = [source['primary'] if compare == 'primary' else source['secondary'][compare]
+                     for source in (frozen, refit)]
+        position = np.arange(2) + offset
+        mean = 1000 * np.asarray([effect['reduction'] for effect in estimates])
+        low, high = 1000 * np.asarray([effect['ci95_familywise'] for effect in estimates]).T
+        target.plot(position, mean, color=color, linestyle=style, linewidth=1.25, zorder=2)
+        target.errorbar(position, mean, yerr=[mean - low, high - mean], fmt='none', ecolor=color,
+                        capsize=2.7, capthick=.88, elinewidth=.88, alpha=.88, zorder=3)
+        for x, value in zip(position, mean, strict=True):
+            target.annotate(f'{value:.1f}'.replace('-', '−'), (x, value),
+                            xytext=(4, 3 if compare == 'primary' else -3), textcoords='offset points',
+                            color=color, fontsize=6.9, va='bottom' if compare == 'primary' else 'top')
+    target.set_xticks([0, 1], ['Frozen', 'Refitted'])
+    target.set_xlim(-.25, 1.25)
+    target.set_ylabel(r'RPS reduction ($10^{-3}$)', labelpad=2)
+    target.yaxis.set_major_locator(MaxNLocator(5))
+    panel(overall, 'a', y=1.075)
+    panel(target, 'b', y=1.075)
+    with (np.load(runs / 'msp_face_transfer_matched_evidence.npz', allow_pickle=False) as frozen_cases,
+          np.load(runs / 'msp_face_refit_evidence.npz', allow_pickle=False) as refitted_cases):
+        for key in ('ids', 'seeds', 'y', 'sentiment', 'masks'):
+            np.testing.assert_array_equal(frozen_cases[key], refitted_cases[key])
+        y = frozen_cases['y']
+        changes = np.array([
+            (supporting.ranked_probability_score(table['anchor'][:, 1:3], y)
+             - supporting.ranked_probability_score(table['intensity'][:, 1:3], y)).mean((0, 1))
+            for table in (frozen_cases, refitted_cases)
+        ])
+    means = changes.mean(1)
+    np.testing.assert_allclose(means, [x['secondary']['anchor']['reduction'] for x in (frozen, refit)],
+                               atol=1e-7)
+    plot_gain_transitions(switching, changes)
+    for axis, entries in ((overall, [(SLATE, '-', 'Text anchor'), (TEAL, '-', 'Shared')]),
+                          (target, [(TEAL, '-', 'vs. independent'), (INDIGO, '--', 'vs. anchor')])):
+        handles = [Line2D([], [], color=color, ls=style, label=label) for color, style, label in entries]
+        axis.legend(handles=handles, loc='lower right', bbox_to_anchor=(1.0, 1.104), ncol=2, frameon=False,
+                    fontsize=7.2, handlelength=1.28, handletextpad=.34, columnspacing=.62, borderpad=0)
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+    upper = Bbox.union([axis.get_tightbbox(renderer) for axis in (overall, target)])
+    flow = Bbox.union([artist.get_window_extent(renderer) for artist in (*switching.texts, *switching.patches)])
+    shift = (flow.x0 + flow.x1 - upper.x0 - upper.x1) / (2 * switching.bbox.width)
+    switching.set_xlim(shift, 1 + shift)
+    panel(switching, 'c', y=1.01)
+    return figure
+
+
+def supplementary(runs, output, alignment_script, report_directory):
+    single_argument = {
+        'fixed_transcripts': supporting.plot_fixed_transcripts,
+        'frozen_dialogue': supporting.plot_frozen_dialogue,
+        'frozen_lnln_heads': supporting.plot_frozen_lnln_heads,
+        'intensity_calibration': supporting.plot_score_gain,
+        'modality_agreement': supporting.plot_modality_ratings,
+        'moud_transfer': supporting.plot_moud_transfer,
+        'msp_face_transfer': supporting.plot_msp_face_transfer,
+        'neutral_readout': supporting.plot_neutral_readout,
+        'ordinal_controls': supporting.plot_ordinal_controls,
+        'probability_pool': supporting.plot_probability_pool,
+        'published_seeds': partial(supporting.plot_published_cohorts, include_raw=False),
+        'seed_sensitivity': supporting.plot_seed_sensitivity,
+        'visual_components': supporting.plot_visual_components,
+    }
+    with_layout = {
+        'audio_channel': supporting.plot_audio_channel,
+        'benchmark_components': supporting.plot_benchmark_components,
+        'class_weighting': supporting.plot_class_weighting,
+        'conditional_intensity': supporting.plot_conditional_intensity,
+        'cremad': supporting.plot_cremad,
+        'dispersion_pooling': supporting.plot_dispersion_pooling,
+        'face_crops': supporting.plot_face_crops,
+        'gap_location': supporting.plot_gap_location,
+        'marginal_tilt': supporting.plot_marginal_tilt,
+        'module_effects': supporting.plot,
+        'msp_face_refit': supporting.plot_msp_face_refit,
+        'seed_ensemble': supporting.plot_seed_ensemble,
+        'view_stability': supporting.plot_view_stability,
+    }
+    with TemporaryDirectory(prefix='kbs_supporting_panels_') as temporary:
+        directory = Path(temporary)
+        drawn = set()
+        for name, blocks in SUPPLEMENT_PLATES.items():
+            parts = list(plate_parts(directory, blocks))
+            for part in parts:
+                source = part.path.stem
+                if source in single_argument:
+                    single_argument[source](runs, part)
+                else:
+                    layout = report_directory / f'{source}_alignment.json' if report_directory else None
+                    with_layout[source](runs, part, alignment_script, layout)
+                drawn.add(source)
+            assemble_plate(output / f'{name}.pdf', parts)
+        if drawn != set(single_argument) | set(with_layout):
+            raise ValueError('The supplementary plates must account for every diagnostic plot.')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--runs', required=True, type=Path)
+    parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--alignment-script', type=Path)
+    parser.add_argument('--report-directory', type=Path)
+    parser.add_argument('--supplement', action='store_true')
+    args = parser.parse_args()
+    configure_figure()
+    args.output.mkdir(parents=True, exist_ok=True)
+    if args.supplement:
+        supplementary(args.runs, args.output, args.alignment_script, args.report_directory)
+        return
+    if args.alignment_script:
+        sys.path.insert(0, str(args.alignment_script))
+        from audit_panel_alignment import require_matplotlib_panel_alignment
+    for name, render in [('model_trace', model_trace), ('coupling_evidence', coupling_evidence),
+                         ('within_polarity_evidence', within_polarity_evidence),
+                         ('robustness_evidence', robustness_evidence), ('transfer_evidence', transfer_evidence)]:
+        figure = render(args.runs)
+        if args.alignment_script:
+            log = args.report_directory / f'{name}_alignment.json' if args.report_directory else None
+            require_matplotlib_panel_alignment(figure, json_out=log)
+        export(figure, args.output / f'{name}.pdf', align_panels=True)
+
+
+if __name__ == '__main__':
+    main()
