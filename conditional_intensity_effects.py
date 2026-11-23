@@ -110,25 +110,31 @@ def order_group_totals(shared, shuffled, label, intensity, membership):
                 original_sums=by_video(genuine), shuffled_sums=by_video(permutation))
 
 
-def summarize_order_groups(record, resamples):
+def summarize_order_groups(record, resamples, *, equal_video_weight=False):
     counts = np.asarray(record['pair_counts'], dtype=np.int64)
     original = np.asarray(record['original_sums'], dtype=np.float64)
     shuffled = np.asarray(record['shuffled_sums'], dtype=np.float64)
     if original.shape != (len(SEEDS), counts.size) or shuffled.shape != original.shape or (counts <= 0).any():
         raise ValueError('Expected matched paired-fit totals for each source video.')
     n_pairs = int(counts.sum())
+    weights = counts
+    if equal_video_weight:
+        original = original / counts
+        shuffled = shuffled / counts
+        weights = np.ones_like(counts)
+    total_weight = int(weights.sum())
     tail = .025 / (len(COHORTS) * 2)
 
     def estimate(totals):
-        per_seed = totals.sum(axis=1) / n_pairs
+        per_seed = totals.sum(axis=1) / total_weight
         return dict(reduction=float(per_seed.mean()), by_seed=per_seed.tolist(),
-                    ci95_familywise=grouped_seed_video_interval(totals, counts, resamples,
+                    ci95_familywise=grouped_seed_video_interval(totals, weights, resamples,
                                                                 quantiles=(tail, 1 - tail)))
 
     return dict(pairs=n_pairs, source_videos=counts.size,
-                concordance_shared=float(original.sum(axis=1).mean() / n_pairs),
-                concordance_shuffled=float(shuffled.sum(axis=1).mean() / n_pairs),
-                gain_above_half=estimate(original - .5 * counts),
+                concordance_shared=float(original.sum(axis=1).mean() / total_weight),
+                concordance_shuffled=float(shuffled.sum(axis=1).mean() / total_weight),
+                gain_above_half=estimate(original - .5 * weights),
                 gain_above_shuffle=estimate(original - shuffled))
 
 
@@ -180,15 +186,21 @@ def main():
     source.add_argument('--runs', type=Path)
     source.add_argument('--evidence', type=Path)
     source.add_argument('--grouped-order', type=Path, help='Reproduce concordance from per-video aggregates.')
+    parser.add_argument('--equal-video-weight', action='store_true',
+                        help='Give every video equal weight in the grouped ordering comparison.')
     parser.add_argument('--write-evidence', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--resamples', default=20_000, type=int)
     args = parser.parse_args()
     if args.resamples < 1 or (args.write_evidence and not args.runs):
         parser.error('Use a positive resample count and write evidence only from training runs.')
+    if args.equal_video_weight and args.grouped_order is None:
+        parser.error('Equal video weighting requires --grouped-order.')
     if args.grouped_order is not None:
         grouped = json.loads(args.grouped_order.read_text(encoding='utf-8'))
-        summary = {cohort: summarize_order_groups(grouped[cohort], args.resamples) for cohort in COHORTS}
+        summary = {cohort: summarize_order_groups(grouped[cohort], args.resamples,
+                                                   equal_video_weight=args.equal_video_weight)
+                   for cohort in COHORTS}
         args.output.write_text(json.dumps(summary, indent=2, allow_nan=False) + '\n', encoding='utf-8')
         return
     if args.runs:
