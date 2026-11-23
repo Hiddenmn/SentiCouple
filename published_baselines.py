@@ -1,5 +1,6 @@
 """Run published fusion architectures on the same frozen input features."""
 
+from contextlib import contextmanager
 import importlib
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -13,6 +14,7 @@ from torch import nn
 from torch.nn import functional as F
 import yaml
 
+from mosei_baselines import MOSEI_BASELINES, build_mosei_baseline
 from networks import intensity_anchor, sentiment_shift
 
 
@@ -20,6 +22,8 @@ UPSTREAM = {
     'lnln': '80a052c62b7b3b7a6cb6956846e9d9c121f56eda',
     'tfr-net': '00f06a68a44a6b6fc0043f01954336f30ec3b090',
     'rm-net': '04efd21bd4999e15892af8072ee90ba6fe0e2e8d',
+    'api': '696110460b064599f5fdb4ae0329bbc2cf356246',
+    'ucmr-net': '1b12c4232995b5661d1b5f760cb5749c6db279d9',
 }
 
 ANCHORED_HEADS = ('anchored-shared', 'anchored-independent')
@@ -34,7 +38,7 @@ def zero_projection(layer, outputs):
     return projection
 
 
-def import_upstream(name, path):
+def verified_upstream(name, path):
     path = Path(path).resolve(strict=True)
     revision = subprocess.check_output(['git', '-C', str(path), 'rev-parse', 'HEAD'],
                                        text=True).strip()
@@ -44,8 +48,25 @@ def import_upstream(name, path):
                                       text=True).strip()
     if changes:
         raise ValueError('Use the pinned upstream source without tracked edits.')
-    sys.path.insert(0, str(path))
     return path
+
+
+@contextmanager
+def upstream_imports(path, package=None):
+    # TFR-Net and LNLN both import a top-level package named "models".
+    def is_upstream_module(name):
+        return package is not None and (name == package or name.startswith(package + '.'))
+
+    previous = {name: sys.modules.pop(name) for name in tuple(sys.modules) if is_upstream_module(name)}
+    sys.path.insert(0, str(path))
+    try:
+        yield
+    finally:
+        sys.path.remove(str(path))
+        for name in tuple(sys.modules):
+            if is_upstream_module(name):
+                del sys.modules[name]
+        sys.modules.update(previous)
 
 
 class LNLNFeatures(nn.Module):
@@ -261,10 +282,16 @@ class AnchoredReadout(nn.Module):
 
 
 def build_published(name, upstream, corpus, dimensions, lengths, head, visual_only):
-    path = import_upstream(name, upstream)
-    template = 'sims' if corpus in ('omg', 'msp-face') else corpus
-    if name == 'lnln':
-        return LNLNFeatures(path, template, dimensions, lengths, head)
-    if name == 'rm-net':
-        return RMNetFeatures(path, dimensions, lengths)
-    return TFRFeatures(dimensions, lengths, head, template, visual_only)
+    path = verified_upstream(name, upstream)
+    package = 'models' if name in ('lnln', 'tfr-net') else None
+    with upstream_imports(path, package):
+        if name in MOSEI_BASELINES:
+            if corpus != 'mosei' or head != 'regression' or not visual_only:
+                raise ValueError('The cached-feature adapter uses CMU-MOSEI text and vision with a regression readout.')
+            return build_mosei_baseline(name, path, dimensions, lengths)
+        template = 'sims' if corpus in ('omg', 'msp-face') else corpus
+        if name == 'lnln':
+            return LNLNFeatures(path, template, dimensions, lengths, head)
+        if name == 'rm-net':
+            return RMNetFeatures(path, dimensions, lengths)
+        return TFRFeatures(dimensions, lengths, head, template, visual_only)

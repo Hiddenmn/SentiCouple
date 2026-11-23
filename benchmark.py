@@ -14,6 +14,7 @@ from torch.nn import functional as F
 
 from ablate import ranked_probability_score
 from data import load_clips, observation_views
+from mosei_baselines import MOSEI_BASELINES
 from networks import TextAnchor
 from published_baselines import ANCHORED_HEADS, UPSTREAM, AnchoredReadout, build_published
 from train import BatchSource, index_batches
@@ -118,8 +119,9 @@ def save_training_state(path, args, model, optimizer, rng, best, history, second
 
 
 def fit_model(args, model, source, split, labels):
-    optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=args.lr,
-                                  weight_decay=args.weight_decay)
+    optimizer_class = torch.optim.Adam if args.model == 'api' else torch.optim.AdamW
+    optimizer = optimizer_class((p for p in model.parameters() if p.requires_grad), lr=args.lr,
+                                weight_decay=args.weight_decay)
     rng = np.random.default_rng(args.seed + 1)
     best = None
     tune_labels = labels[split['tune']]
@@ -156,7 +158,9 @@ def fit_model(args, model, source, split, labels):
             clips = torch.as_tensor(indices, device=source.device)
             view = torch.from_numpy(rng.integers(len(source.views), size=len(indices))).to(source.device)
             inputs = model_inputs(source, view, clips, reconstruct=True)
-            if class_weights is not None:
+            if args.model in MOSEI_BASELINES:
+                total_loss = model.training_objective(*inputs, source.intensity[clips] * source.intensity_scale)
+            elif class_weights is not None:
                 total_loss = model.training_loss(*inputs, source.label[clips], source.intensity[clips], class_weights)
             else:
                 output, auxiliary = model(*inputs)
@@ -170,8 +174,10 @@ def fit_model(args, model, source, split, labels):
                 total_loss = task_loss + auxiliary
             optimizer.zero_grad(set_to_none=True)
             total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), .6 if args.model == 'api' else 1.)
             optimizer.step()
+        if args.model == 'api':
+            model.finish_epoch()
         tune = predict(model, source, split['tune'], args.batch, (1, 2))
         calibration = calibrate_intensity(tune[..., 0], tune_labels) if args.head == 'regression' else None
         posterior, _ = forecast(tune, args.head, source.intensity_scale, calibration)
@@ -208,12 +214,14 @@ def verify_valence_reference(args, clips, split):
         np.testing.assert_array_equal(clips.label[split['tune']], tune['y'])
 
 
-def run(args):
+def run(args, dataset=None):
     clock = time.perf_counter()
     torch.set_num_threads(args.threads)
     torch.backends.cudnn.deterministic = True
-    clips, split = load_clips(args.data, 24, args.split, 1729, group_reference=args.group_reference,
-                              eval_groups=args.eval_groups, neutral_margin=args.neutral_margin)
+    if dataset is None:
+        dataset = load_clips(args.data, 24, args.split, 1729, group_reference=args.group_reference,
+                             eval_groups=args.eval_groups, neutral_margin=args.neutral_margin)
+    clips, split = dataset
     if args.corpus in ('omg', 'msp-face'):
         verify_valence_reference(args, clips, split)
     views = observation_views(clips, [.35, .65], 1777,
@@ -314,6 +322,8 @@ def main():
         parser.error('Use the official valence split and pass --neutral-margin .10.')
     if args.model == 'rm-net' and args.head != 'joint':
         parser.error('RM-Net uses the published categorical and additive intensity heads (--head joint).')
+    if args.model in MOSEI_BASELINES and (args.corpus, args.head, args.inputs) != ('mosei', 'regression', 'visual'):
+        parser.error('Use --corpus mosei --head regression --inputs visual for this cached-feature adapter.')
     if args.model != 'rm-net' and args.rmnet_class_weighting != 'inverse-frequency':
         parser.error('--rmnet-class-weighting changes the classification terms of the RM-Net core.')
     if min(args.epochs, args.patience, args.threads) < 1 or args.batch < 2 or args.lr <= 0:

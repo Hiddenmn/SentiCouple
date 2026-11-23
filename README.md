@@ -17,6 +17,7 @@ Relative to a matched independent intensity head, the shared update lowered rank
 | Train the text anchor and shared or independent heads | [`train.py`](train.py) |
 | Inspect the architecture and shared score update | [`networks.py`](networks.py) |
 | Match the published fusion cores | [`benchmark.py`](benchmark.py), [`published_baselines.py`](published_baselines.py) |
+| Refit the CMU-MOSEI baselines and replay the comparison | [`benchmark_mosei.py`](benchmark_mosei.py), [`mosei_results.py`](mosei_results.py) |
 | Recompute the paired estimates | [`primary_comparisons.py`](primary_comparisons.py), [`conditional_intensity_effects.py`](conditional_intensity_effects.py) |
 | Regenerate the manuscript figures from prediction packets | [`paper_figures.py`](paper_figures.py), [`REPRODUCE.md`](REPRODUCE.md) |
 
