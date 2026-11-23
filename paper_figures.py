@@ -70,12 +70,12 @@ def architecture_flow(axis, visual, visible):
     panel(axis, 'b', y=1.065)
     box(axis, .103, .741, .174, .295, 'Statement ID\n+ masks', PALE_BLUE)
     box(axis, .103, .253, .174, .295, '', PALE_TEAL)
-    axis.text(.103, .344, 'Observed CLIP bins', ha='center', va='center', fontsize=7.45)
+    axis.text(.103, .320, 'Observed CLIP bins', ha='center', va='center', fontsize=7.45)
     features = normalized_channels(visual)
     sample = np.ma.array(features, mask=np.broadcast_to(~visible, features.shape))
-    axis.imshow(sample, extent=(.034, .172, .143, .273), cmap=CHANNELS.with_extremes(bad='#F9FAFB'),
+    axis.imshow(sample, extent=(.034, .172, .139, .244), cmap=CHANNELS.with_extremes(bad='#F9FAFB'),
                 vmin=-2, vmax=2, aspect='auto', interpolation='none', zorder=3)
-    axis.add_patch(Rectangle((.034, .143), .138, .130, facecolor='none',
+    axis.add_patch(Rectangle((.034, .139), .138, .105, facecolor='none',
                              edgecolor='#8D9CA8', linewidth=.45, zorder=4))
     box(axis, .337, .741, .211, .295, 'Text anchor\n' + r'$\ell,\ s_0$', PALE_BLUE)
     box(axis, .337, .253, .211, .295, 'Visual encoder\nMean + max', PALE_TEAL)
@@ -145,8 +145,8 @@ def feature_strip(axis, features, visible, center, height=.59):
 
 
 def probability_stack(axis, row, prediction, alpha):
-    axis.barh(row, prediction, left=np.r_[0., np.cumsum(prediction[:-1])], height=.205,
-              color=CLASS_COLORS, edgecolor='white', linewidth=.45, alpha=alpha, zorder=2)
+    axis.barh(row, prediction, left=np.r_[0., np.cumsum(prediction[:-1])], height=.250,
+              color=CLASS_COLORS, edgecolor='none', alpha=alpha, zorder=2)
 
 
 def model_trace(runs):
@@ -194,10 +194,12 @@ def model_trace(runs):
                 probability = prediction[polarity]
                 probabilities.text(left + probability / 2, y, f'{probability:.1%}',
                                    color=color, ha='center', va='center', fontsize=6.35)
-            intensity.text(before, row + .235, f'{before:.3f}'.replace('-', '−'), color=SLATE,
-                           va='bottom', ha='center', fontsize=6.6)
-            intensity.text(after, row - .195, f'{after:.3f}'.replace('-', '−'), color=TEAL,
-                           va='top', ha='center', fontsize=6.6)
+            intensity.annotate(f'{before:.3f}'.replace('-', '−'), (before, row + .18),
+                               xytext=(-3, 1.2), textcoords='offset points', color=SLATE,
+                               va='bottom', ha='right', fontsize=6.6)
+            intensity.annotate(f'{after:.3f}'.replace('-', '−'), (after, row - .113),
+                               xytext=(3, -2), textcoords='offset points', color=TEAL,
+                               va='top', ha='left', fontsize=6.6)
     shifts.axvline(0, color=SLATE, linewidth=.65, zorder=1)
     intensity.axvline(float(data['target']), color=SLATE, linewidth=.75, linestyle=(0, (3, 3)), zorder=1)
     observations.set_xticks([.5, 11.5, 23.5], ['1', '12', '24'])
@@ -303,13 +305,15 @@ def coupling_evidence(runs):
               ha='right', va='bottom', fontsize=7.35)
     class_names = ('negative', 'neutral', 'positive')
     values = 1000 * np.array([crema['contributions_by_polarity'][p] for p in class_names])
-    for j, (color, offset) in enumerate(((MAGENTA, .15), (INDIGO, -.15))):
+    for j, (color, offset) in enumerate(((MAGENTA, .20), (INDIGO, -.20))):
         for row, value in zip((2, 1, 0), values[:, j], strict=True):
-            components.barh(row + offset, value, height=.235, color=color, zorder=2)
-            components.annotate(f'{value:.1f}'.replace('-', '−'), (value, row + offset),
+            components.barh(row + offset, value, height=.205, color=color, zorder=2)
+            label_position = max(value, 1.7) if value >= 0 else value
+            components.annotate(f'{value:.1f}'.replace('-', '−'), (label_position, row + offset),
                                 xytext=(2.5 if value >= 0 else -2.5, 0), textcoords='offset points',
                                 color=INK, ha='left' if value >= 0 else 'right', va='center', fontsize=6.8)
     forest_axis(components, POLARITY, r'RPS component gain ($10^{-3}$)', limits=(-18, 53))
+    components.grid(False, axis='y')
     statement_predictions(examples, runs)
     for axis, letter in zip((examples, fits, components), 'abc', strict=True):
         panel(axis, letter)
@@ -536,10 +540,14 @@ def transfer_evidence(runs):
         target.plot(position, mean, color=color, linestyle=style, linewidth=1.25, zorder=2)
         target.errorbar(position, mean, yerr=[mean - low, high - mean], fmt='none', ecolor=color,
                         capsize=2.7, capthick=.88, elinewidth=.88, alpha=.88, zorder=3)
-        for x, value in zip(position, mean, strict=True):
+        if compare == 'primary':
+            offsets = [(-4, 0, 'right', 'center'), (-14, 3, 'right', 'bottom')]
+        else:
+            offsets = [(14, -3, 'left', 'top'), (5, -5, 'left', 'top')]
+        for x, value, (dx, dy, horizontal, vertical) in zip(position, mean, offsets, strict=True):
             target.annotate(f'{value:.1f}'.replace('-', '−'), (x, value),
-                            xytext=(4, 3 if compare == 'primary' else -3), textcoords='offset points',
-                            color=color, fontsize=6.9, va='bottom' if compare == 'primary' else 'top')
+                            xytext=(dx, dy), textcoords='offset points', color=color,
+                            fontsize=6.9, ha=horizontal, va=vertical)
     target.set_xticks([0, 1], ['Frozen', 'Refitted'])
     target.set_xlim(-.25, 1.25)
     target.set_ylabel(r'RPS reduction ($10^{-3}$)', labelpad=2)
