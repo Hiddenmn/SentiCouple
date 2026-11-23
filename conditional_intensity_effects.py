@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ablate import ranked_probability_score, read_predictions
+from ablate import grouped_seed_video_interval, ranked_probability_score, read_predictions
 from compare_benchmarks import load_matched, load_metadata
 from coupling import logit_coordinates, rps_summary
 from ordinal_controls import COHORTS, SEEDS, paired_reduction, verify_pairs
@@ -96,17 +96,45 @@ def pair_concordance(shifts, left, right, order):
     return .5 + .5 * order * direction
 
 
-def within_video_order(shared, shuffled, label, intensity, membership, resamples):
+def order_group_totals(shared, shuffled, label, intensity, membership):
     left, right = within_video_pairs(label, intensity, membership)
     order = np.sign(intensity[left] - intensity[right])
     videos, pair_group = np.unique(membership[left], return_inverse=True)
     genuine = pair_concordance(shared, left, right, order).mean(axis=1)
     permutation = pair_concordance(shuffled, left, right, order).mean(axis=1)
-    family = len(COHORTS) * 2
-    return dict(pairs=len(left), source_videos=len(videos),
-                concordance_shared=float(genuine.mean()), concordance_shuffled=float(permutation.mean()),
-                gain_above_half=paired_reduction(genuine - .5, pair_group, resamples, family),
-                gain_above_shuffle=paired_reduction(genuine - permutation, pair_group, resamples, family))
+
+    def by_video(values):
+        return [np.bincount(pair_group, weights=row, minlength=len(videos)).tolist() for row in values]
+
+    return dict(pair_counts=np.bincount(pair_group).tolist(),
+                original_sums=by_video(genuine), shuffled_sums=by_video(permutation))
+
+
+def summarize_order_groups(record, resamples):
+    counts = np.asarray(record['pair_counts'], dtype=np.int64)
+    original = np.asarray(record['original_sums'], dtype=np.float64)
+    shuffled = np.asarray(record['shuffled_sums'], dtype=np.float64)
+    if original.shape != (len(SEEDS), counts.size) or shuffled.shape != original.shape or (counts <= 0).any():
+        raise ValueError('Expected matched paired-fit totals for each source video.')
+    n_pairs = int(counts.sum())
+    tail = .025 / (len(COHORTS) * 2)
+
+    def estimate(totals):
+        per_seed = totals.sum(axis=1) / n_pairs
+        return dict(reduction=float(per_seed.mean()), by_seed=per_seed.tolist(),
+                    ci95_familywise=grouped_seed_video_interval(totals, counts, resamples,
+                                                                quantiles=(tail, 1 - tail)))
+
+    return dict(pairs=n_pairs, source_videos=counts.size,
+                concordance_shared=float(original.sum(axis=1).mean() / n_pairs),
+                concordance_shuffled=float(shuffled.sum(axis=1).mean() / n_pairs),
+                gain_above_half=estimate(original - .5 * counts),
+                gain_above_shuffle=estimate(original - shuffled))
+
+
+def within_video_order(shared, shuffled, label, intensity, membership, resamples):
+    groups = order_group_totals(shared, shuffled, label, intensity, membership)
+    return summarize_order_groups(groups, resamples)
 
 
 def summarize_cohort(arrays, cohort, meta, resamples):
@@ -151,12 +179,18 @@ def main():
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument('--runs', type=Path)
     source.add_argument('--evidence', type=Path)
+    source.add_argument('--grouped-order', type=Path, help='Reproduce concordance from per-video aggregates.')
     parser.add_argument('--write-evidence', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--resamples', default=20_000, type=int)
     args = parser.parse_args()
-    if args.resamples < 1 or (args.evidence and args.write_evidence):
+    if args.resamples < 1 or (args.write_evidence and not args.runs):
         parser.error('Use a positive resample count and write evidence only from training runs.')
+    if args.grouped_order is not None:
+        grouped = json.loads(args.grouped_order.read_text(encoding='utf-8'))
+        summary = {cohort: summarize_order_groups(grouped[cohort], args.resamples) for cohort in COHORTS}
+        args.output.write_text(json.dumps(summary, indent=2, allow_nan=False) + '\n', encoding='utf-8')
+        return
     if args.runs:
         arrays = collect_evidence(args.runs)
     else:

@@ -24,7 +24,11 @@ The benchmark JSON files contain the forecast metrics and inference times used i
 python primary_comparisons.py --grouped runs/primary_grouped_rps.json
 ```
 
-The grouped record contains clip counts and paired loss sums, with the class weights already applied for RAVDESS.
+The grouped record contains clip counts and paired loss sums, with the class weights already applied for RAVDESS. The following command reproduces the ordering gains and intervals in Table 3 from pair counts and concordance sums by source video and fit.
+
+```sh
+python conditional_intensity_effects.py --grouped-order runs/within_video_order_groups.json --output reproduced_ordering.json
+```
 
 `runs/conditional_intensity_effects.json` summarizes the ordering and score-calibration comparisons. `runs/within_polarity_examples.npz` gives the 16 clips plotted in the main paper, with updates averaged across the 35% and 65% visual gaps. The MSP-Face transition counts in `runs/msp_face_refit_paired.json` summarize which forecasts improved after visual fusion before and after refitting.
 
@@ -38,6 +42,53 @@ The input and target definitions are in Sections 3 and 4 of the main text. Obtai
 - [MOUD video reviews](https://web.eecs.umich.edu/~mihalcea/downloads.html#MOUD) and [MELD dialogue](https://affective-meld.github.io/).
 
 Use the published access conditions for each corpus. The OMG-Emotion release supplies the utterance annotations used by `prepare_omg.py`. The MSP-Face release supplies the source links, segments, labels and official partitions used by `prepare_msp_face.py`. CREMA-D is published under the [Open Database License](https://opendatacommons.org/licenses/odbl/1-0/), and the frame excerpts retain the [database contents license](https://opendatacommons.org/licenses/dbcl/1-0/).
+
+## Prepare and fit the fixed-statement RAVDESS evaluation
+
+Install `openpyxl` to read the RAVDESS ratings workbook. The OMG-Emotion and MSP-Face media tools use `yt-dlp`, Node.js, `imageio-ffmpeg` and OpenCV. The CREMA-D video preparation also uses OpenCV.
+
+Set `RAVDESS_TRACKS` and `RAVDESS_RATINGS` to the released OpenFace track ZIP and the speech ratings workbook. The preparation script writes four actor folds. The following commands fit the pointwise encoder and four heads on each fold, with calibration on its tuning actors.
+
+```sh
+python prepare_ravdess.py --tracks "$RAVDESS_TRACKS" --ratings "$RAVDESS_RATINGS" --output data/ravdess
+
+for fold in 0 1 2 3; do
+  for seed in 97 17 521 31 59 113 251 359 701 997; do
+    python train.py --data "data/ravdess/ravdess_fold${fold}.pkl" --split official \
+      --seed "$seed" --backbone temporal --visual-encoding pointwise --inputs visual \
+      --selection rps --skip-reference-analysis --calibrate-score-gain \
+      --arms fusion intensity independent_intensity intensity_shuffled \
+      --output "runs/ravdess_fold${fold}_seed${seed}" --device cuda
+  done
+done
+python ravdess_effects.py --runs runs --output reproduced_ravdess.json
+```
+
+## Fit the conditional ordering comparison
+
+Use the prepared feature packets below and the ten seeds above. The conditional heads use the same feature encoders and masks as the paired Huber heads on each corpus.
+
+```sh
+for seed in 97 17 521 31 59 113 251 359 701 997; do
+  python train.py --data data/ch_sims_v2_unaligned.pkl --split new-videos \
+    --group-reference data/ch_sims_unaligned_39.pkl --visual-encoding unscaled --seed "$seed" \
+    --backbone temporal --inputs visual --selection rps --skip-reference-analysis \
+    --calibrate-score-gain --arms conditional_shared conditional_independent conditional_shuffled \
+    --output "runs/sims_v2_conditional_intensity_seed${seed}" --device cuda
+
+  python train.py --data data/omg_unaligned.pkl --split official \
+    --neutral-margin 0.10 --visual-encoding pointwise --seed "$seed" \
+    --backbone temporal --inputs visual --selection rps --skip-reference-analysis \
+    --calibrate-score-gain --arms conditional_shared conditional_independent conditional_shuffled \
+    --output "runs/omg_conditional_intensity_seed${seed}" --device cuda
+done
+```
+
+To reproduce the full comparison, also fit the Huber heads and the class-mean controls with the corresponding archived configurations. Keep the original run folder names and the reference benchmark summaries in `runs/`.
+
+```sh
+python conditional_intensity_effects.py --runs runs --output reproduced_conditional_intensity.json
+```
 
 ## Matched text-and-vision forecasts
 
