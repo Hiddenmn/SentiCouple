@@ -9,8 +9,14 @@ import numpy as np
 from data import pool_frames
 
 
-def extract(run, features, output, english_transcript):
-    with np.load(run / 'predictions.npz', allow_pickle=False) as predictions:
+def extract(run, features, output, english_transcript, streams_run=None):
+    if streams_run is None:
+        seed = run.name.rsplit('seed', 1)[-1]
+        streams_run = run.with_name(f'sims_v2_streams_seed{seed}')
+    with (np.load(run / 'predictions.npz', allow_pickle=False) as predictions,
+          np.load(streams_run / 'predictions.npz', allow_pickle=False) as streams):
+        for field in ('ids', 'y', 'sentiment', 'masks', 'anchor'):
+            np.testing.assert_array_equal(predictions[field], streams[field], err_msg=field)
         masks = predictions['masks']
         anchor, fused = predictions['anchor'], predictions['intensity']
         log_change = np.log(fused.astype(np.float64)) - np.log(anchor.astype(np.float64))
@@ -29,6 +35,10 @@ def extract(run, features, output, english_transcript):
             'fused': fused[:, sample], 'signed': signed[:, sample],
             'fused_score': predictions['intensity_score'][:, sample],
         }
+        for stream in ('audio', 'vision'):
+            arm = f'intensity_{stream}'
+            trace[f'text_{stream}'] = streams[arm][:, sample]
+            trace[f'text_{stream}_score'] = streams[f'{arm}_score'][:, sample]
 
     with features.open('rb') as source:
         corpora = pickle.load(source)
@@ -54,12 +64,14 @@ def extract(run, features, output, english_transcript):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run', required=True, type=Path)
+    parser.add_argument('--streams-run', type=Path,
+                        help='Directory of the paired audio and visual ablations.')
     parser.add_argument('--features', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--english-transcript', required=True,
                         help='English translation of the selected clip transcript.')
     args = parser.parse_args()
-    extract(args.run, args.features, args.output, args.english_transcript)
+    extract(args.run, args.features, args.output, args.english_transcript, args.streams_run)
 
 
 if __name__ == '__main__':

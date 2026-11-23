@@ -594,34 +594,54 @@ def transfer_evidence(runs):
 def plot_audiovisual_example(runs, output):
     with np.load(runs / 'audiovisual_example.npz', allow_pickle=False) as packet:
         clip = dict(packet)
-    figure, (features, predictions) = plt.subplots(1, 2, figsize=(6.55, 1.73),
-                                                   gridspec_kw={'width_ratios': (1.27, 1.)})
-    figure.subplots_adjust(left=.122, right=.975, top=.78, bottom=.225, wspace=.41)
-    view = 1
-    for row, name, mask in zip((1, 0), ('audio', 'vision'), clip['masks'][view], strict=True):
-        feature_strip(features, normalized_channels(clip[name]), mask, row, height=.72)
-    features.set(xlim=(0, 24), ylim=(-.49, 1.49), xlabel='Time bin',
-                 xticks=(.5, 11.5, 23.5), xticklabels=('1', '12', '24'))
-    features.set_yticks((1, 0), ('Audio', 'Vision'))
-    features.tick_params(axis='y', length=0, pad=4)
-    features.spines['left'].set_visible(False)
-    features.text(.105, 1.13, f'“{clip["transcript_en"].item()}”', transform=features.transAxes,
-                  fontsize=8.1, va='bottom', color=INK)
-    panel(features, 'a', y=1.12)
+    figure = plt.figure(figsize=(6.55, 2.89))
+    layout = figure.add_gridspec(2, 2, left=.164, right=.966, top=.78, bottom=.19,
+                                 height_ratios=(1., 1.85), hspace=.43, wspace=.21)
+    figure.text(.164, .939, f'“{clip["transcript_en"].item()}”', fontsize=8.4, va='top', color=INK)
+    rating = f'{float(clip["target"]):.2f}'.replace('-', '−')
+    figure.text(.966, .939, f'Audience rating {rating}', fontsize=7.6, va='top', ha='right', color=SLATE)
 
     polarity = int(clip['polarity'])
-    for row, estimate, alpha in ((1, clip['anchor'][view], .38), (0, clip['fused'][view], 1.)):
-        left = np.r_[0., estimate.cumsum()[:-1]]
-        predictions.barh(row, estimate, left=left, height=.59, color=CLASS_COLORS,
-                         alpha=alpha, edgecolor='none')
-        value = estimate[polarity]
-        predictions.text(left[polarity] + value / 2, row, f'{value:.1%}',
-                         color=INK if row == 1 else 'white', ha='center', va='center', fontsize=7.5)
-    predictions.set(xlim=(0, 1), ylim=(-.49, 1.49), xlabel='Class probability',
-                    xticks=(0, .5, 1))
-    predictions.set_yticks((1, 0), ('Text anchor', 'Fusion'))
-    predictions.tick_params(axis='y', length=0, pad=4)
-    predictions.spines['left'].set_visible(False)
+    inputs = ('audio', 'vision')
+    forecasts = ('anchor', 'text_audio', 'text_vision', 'fused')
+    labels = ('Text anchor', 'Text + audio', 'Text + vision', 'Text + audio + vision')
+    for column, view, width in ((0, 1, 35), (1, 2, 65)):
+        features = figure.add_subplot(layout[0, column])
+        predictions = figure.add_subplot(layout[1, column])
+        features.text(.5, 1.13, f'{width}% gap', transform=features.transAxes,
+                      fontsize=8.3, fontweight='medium', ha='center', va='bottom')
+        panel(features, 'ab'[column], y=1.13)
+        for row, name, mask in zip((1, 0), inputs, clip['masks'][view], strict=True):
+            feature_strip(features, normalized_channels(clip[name]), mask, row, height=.73)
+        features.set(xlim=(0, 24), ylim=(-.49, 1.49), xticks=(.5, 11.5, 23.5),
+                     xticklabels=('1', '12', '24'))
+        features.tick_params(axis='x', length=2, pad=2)
+        features.set_yticks((1, 0), ('Audio', 'Vision') if column == 0 else ('', ''))
+        features.tick_params(axis='y', length=0, pad=4)
+        features.spines['left'].set_visible(False)
+
+        score_x = 1.16
+        predictions.text(score_x, 3.62, 'Intensity', fontsize=7.1, ha='center', va='bottom')
+        for row, name in zip(range(3, -1, -1), forecasts, strict=True):
+            estimate = clip[name][view]
+            alpha = 1. if name == 'fused' else .46
+            left = np.r_[0., estimate.cumsum()[:-1]]
+            predictions.barh(row, estimate, left=left, height=.61, color=CLASS_COLORS,
+                             alpha=alpha, edgecolor='none')
+            value = estimate[polarity]
+            predictions.text(left[polarity] + value / 2, row, f'{value:.1%}',
+                             color='white' if name == 'fused' else INK,
+                             ha='center', va='center', fontsize=7.3)
+            if name != 'anchor':
+                score = f'{float(clip[f"{name}_score"][view]):.2f}'.replace('-', '−')
+                predictions.text(score_x, row, score, color=INK, ha='center', va='center', fontsize=7.1)
+        predictions.set(xlim=(0, 1.29), ylim=(-.46, 3.51), xticks=(0, .5, 1))
+        predictions.spines['bottom'].set_bounds(0, 1.)
+        predictions.set_yticks(tuple(range(3, -1, -1)), labels if column == 0 else ('',) * 4)
+        predictions.tick_params(axis='y', length=0, pad=4, labelsize=7.5)
+        predictions.tick_params(axis='x', length=2, pad=2)
+        predictions.spines['left'].set_visible(False)
+    figure.text(.565, .063, 'Class probability', fontsize=8.1, ha='center', va='bottom')
     export(figure, output)
 
 
@@ -652,7 +672,6 @@ def supplementary(runs, output, alignment_script, report_directory):
         'face_crops': supporting.plot_face_crops,
         'gap_location': supporting.plot_gap_location,
         'marginal_tilt': supporting.plot_marginal_tilt,
-        'module_effects': supporting.plot,
         'msp_face_refit': supporting.plot_msp_face_refit,
         'seed_ensemble': supporting.plot_seed_ensemble,
         'view_stability': supporting.plot_view_stability,
