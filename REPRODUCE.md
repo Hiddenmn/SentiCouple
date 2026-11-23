@@ -24,4 +24,4 @@ python paper_figures.py --runs runs --output figures --supplement
 ```
 
 The CREMA-D excerpts in the paper retain their [database contents license](https://opendatacommons.org/licenses/dbcl/1-0/). To reconstruct the figure packets from the original clips, run `figure_example.py`, `gap_examples.py`, or `statement_examples.py` with the CREMA-D checkout and the saved fit inputs. Each script documents the required paths.
-Install a Chinese font such as Microsoft YaHei or Noto Sans CJK SC to render the original CH-SIMS v2 transcript. Use audiovisual_example.py with the seed-97 three-stream forecasts and the original CH-SIMS v2 feature packet to regenerate that trace.
+The three-stream packet stores the original CH-SIMS v2 transcript and its English figure translation. Regenerate it with audiovisual_example.py, the seed-97 three-stream forecasts, the original feature packet, and the documented English transcript.

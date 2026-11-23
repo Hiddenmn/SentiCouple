@@ -9,7 +9,7 @@ import numpy as np
 from data import pool_frames
 
 
-def extract(run, features, output):
+def extract(run, features, output, english_transcript):
     with np.load(run / 'predictions.npz', allow_pickle=False) as predictions:
         masks = predictions['masks']
         anchor, fused = predictions['anchor'], predictions['intensity']
@@ -40,6 +40,7 @@ def extract(run, features, output):
         raise ValueError(f'No feature record for {clip_id}.')
     row, = matches
     trace['transcript'] = str(corpus['raw_text'][row]).strip()
+    trace['transcript_en'] = english_transcript
     score = np.asarray(corpus['regression_labels'], dtype=np.float32).reshape(-1)[row]
     np.testing.assert_array_equal(score, trace['target'])
     for channel, name in enumerate(('audio', 'vision')):
@@ -55,8 +56,10 @@ def main():
     parser.add_argument('--run', required=True, type=Path)
     parser.add_argument('--features', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--english-transcript', required=True,
+                        help='English translation of the selected clip transcript.')
     args = parser.parse_args()
-    extract(args.run, args.features, args.output)
+    extract(args.run, args.features, args.output, args.english_transcript)
 
 
 if __name__ == '__main__':
