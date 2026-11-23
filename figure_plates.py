@@ -79,6 +79,7 @@ def assemble_plate(output, parts):
                      viewBox=f'0 0 {width} {height}')
     ET.SubElement(svg, f'{{{SVG}}}rect', width=str(width), height=str(height), fill='white')
     tex = []
+    label_rows = []
     for index, (part, original, x, top, w, h, scale) in enumerate(rows):
         namespace_ids(original, f'p{index}_')
         original.attrib.update(x=str(x), y=str(top), width=str(w), height=str(h))
@@ -87,16 +88,21 @@ def assemble_plate(output, parts):
                    % (x, height - top - h, w, part.path.name))
         placements = json.loads(part.path.with_suffix('.panels.json').read_text(encoding='utf-8'))
         for row in placements:
-            letters = row['letters']
-            baseline = top + scale * row['baseline_from_top']
-            for letter, offset in zip(letters, row['anchors_from_left'], strict=True):
-                anchor = x + scale * offset
-                label = ET.SubElement(svg, f'{{{SVG}}}text', x=f'{anchor:.5f}', y=f'{baseline:.5f}',
-                                      fill='black', attrib={'font-family': 'Arial, sans-serif',
-                                                            'font-size': '9', 'font-weight': 'bold'})
-                label.text = letter
-                tex.append(r'\put(%.5f,%.5f){\sffamily\bfseries\fontsize{9bp}{10bp}\selectfont %s}'
-                           % (anchor, height - baseline, letter))
+            anchors = [x + scale * offset for offset in row['anchors_from_left']]
+            label_rows.append((row['letters'], top + scale * row['baseline_from_top'], anchors))
+
+    # Set the label columns after all parts have been scaled and placed.
+    column_count = max(len(anchors) for _, _, anchors in label_rows)
+    columns = [min(anchors[column] for _, _, anchors in label_rows if column < len(anchors))
+               for column in range(column_count)]
+    for letters, baseline, _ in label_rows:
+        for letter, anchor in zip(letters, columns[:len(letters)], strict=True):
+            label = ET.SubElement(svg, f'{{{SVG}}}text', x=f'{anchor:.5f}', y=f'{baseline:.5f}',
+                                  fill='black', attrib={'font-family': 'Arial, sans-serif',
+                                                        'font-size': '9', 'font-weight': 'bold'})
+            label.text = letter
+            tex.append(r'\put(%.5f,%.5f){\sffamily\bfseries\fontsize{9bp}{10bp}\selectfont %s}'
+                       % (anchor, height - baseline, letter))
 
     name = output.stem
     source = directory / f'{name}.tex'

@@ -20,7 +20,7 @@ Sharing the signed update reduced ranked probability score by 0.0081 with text, 
 | Compare six models under matched visual gaps | [`benchmark_mosei.py`](benchmark_mosei.py), [`mosei_results.py`](mosei_results.py), [`frozen_benchmark.py`](frozen_benchmark.py) |
 | Replay the three-stream comparison with UCMR-Net | [`three_stream_benchmark.py`](three_stream_benchmark.py) |
 | Recompute the paired estimates | [`primary_comparisons.py`](primary_comparisons.py), [`conditional_intensity_effects.py`](conditional_intensity_effects.py) |
-| Regenerate the manuscript figures from prediction packets | [`paper_figures.py`](paper_figures.py), [`REPRODUCE.md`](REPRODUCE.md) |
+| Regenerate the manuscript figures | [`paper_figures.py`](paper_figures.py), [`REPRODUCE.md`](REPRODUCE.md) |
 
 ## Setup
 
@@ -38,4 +38,4 @@ Obtain the feature files from the original providers listed in [REPRODUCE.md](RE
 python train.py --data data/ch_sims_v2_unaligned.pkl --group-reference data/ch_sims_unaligned_39.pkl --split new-videos --selection rps --seed 97 --backbone temporal --visual-encoding unscaled --inputs visual --calibrate-score-gain --skip-reference-analysis --arms intensity intensity_pointwise fusion independent_intensity --output runs/sims_v2_compact_pooled_seed97
 ```
 
-The peer-review companion archive contains the paired predictions, fitted example checkpoints and source data for the figures. The public repository contains the scripts and dependency specifications. Source datasets are obtained from their publishers under their respective access terms.
+The peer-review companion archive contains the run configurations, benchmark summaries and data used to draw the figures. The public repository contains the scripts and dependency specifications. Source datasets are obtained from their publishers under their respective access terms.

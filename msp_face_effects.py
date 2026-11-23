@@ -248,6 +248,13 @@ def adaptation_comparison(refit, transfer, resamples):
     return results
 
 
+def clip_gain_transitions(frozen_gains, refitted_gains):
+    """Count clips by whether vision lowers their RPS, before and after refitting."""
+    frozen_no_gain = np.asarray(frozen_gains) <= 0
+    refitted_no_gain = np.asarray(refitted_gains) <= 0
+    return np.bincount(2 * frozen_no_gain + refitted_no_gain, minlength=4).reshape(2, 2)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--target', type=Path)
@@ -293,6 +300,12 @@ def main():
         with np.load(args.frozen_evidence, allow_pickle=False) as packet:
             transfer = dict(packet)
         report['adaptation'] = adaptation_comparison(evidence, transfer, args.resamples)
+        gains = [
+            (ranked_probability_score(fit['anchor'][:, 1:3], fit['y'])
+             - ranked_probability_score(fit['intensity'][:, 1:3], fit['y'])).mean((0, 1))
+            for fit in (transfer, evidence)
+        ]
+        report['clip_gain_transitions'] = clip_gain_transitions(*gains).tolist()
     write_json(args.output, report)
     print(dict(study=report['study'], clips=report['n_clips'], primary=report['primary']), flush=True)
 

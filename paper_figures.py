@@ -200,19 +200,16 @@ def model_trace(runs):
             for offset, update in ((.145, data['signed'][i]), (-.145, data['neutral'][i])):
                 shifts.text(update / 2, row + offset, f'{update:.2f}'.replace('-', '−'),
                             ha='center', va='center', color='white', fontsize=6.3)
-            polarity = int(data['polarity'])
-            for y, prediction, color in ((row + .143, data['anchor'][i], INK),
-                                         (row - .143, data['fused'][i], 'white')):
-                left = prediction[:polarity].sum()
-                probability = prediction[polarity]
-                probabilities.text(left + probability / 2, y, f'{probability:.1%}',
+            rated = int(data['polarity'])
+            for y, forecast, color in ((row + .143, data['anchor'][i], INK),
+                                       (row - .143, data['fused'][i], 'white')):
+                value = forecast[rated]
+                probabilities.text(forecast[:rated].sum() + value / 2, y, f'{value:.1%}',
                                    color=color, ha='center', va='center', fontsize=6.35)
-            intensity.annotate(f'{before:.3f}'.replace('-', '−'), (before, row + .18),
-                               xytext=(-3, .9), textcoords='offset points', color=SLATE,
-                               va='bottom', ha='right', fontsize=6.6)
-            intensity.annotate(f'{after:.3f}'.replace('-', '−'), (after, row - .113),
-                               xytext=(3, -2), textcoords='offset points', color=TEAL,
-                               va='top', ha='left', fontsize=6.6)
+            intensity.text(before, row + .22, f'{before:.3f}'.replace('-', '−'),
+                           color=SLATE, va='bottom', ha='right', fontsize=6.6)
+            intensity.text(after, row - .18, f'{after:.3f}'.replace('-', '−'),
+                           color=TEAL, va='top', ha='left', fontsize=6.6)
     shifts.axvline(0, color=SLATE, linewidth=.65, zorder=1)
     intensity.axvline(float(data['target']), color=SLATE, linewidth=.75, linestyle=(0, (3, 3)), zorder=1)
     observations.set_xticks([.5, 11.5, 23.5], ['1', '12', '24'])
@@ -235,9 +232,6 @@ def model_trace(runs):
         for boundary in [.5, 1.5, 2.5]:
             axis.axhline(boundary, color=GRID, linewidth=.55, zorder=0)
 
-    probabilities.set_xlabel('Class probability\nAnchor above fusion', labelpad=3.5)
-    intensity.set_xlabel(f'Signed intensity\nAudience {float(data["target"]):.3f}'.replace('-', '−'),
-                         labelpad=3.5)
     key = observations.inset_axes([.09, -.34, .80, .034])
     scale = figure.colorbar(image, cax=key, orientation='horizontal', ticks=[-2, 0, 2])
     scale.outline.set_visible(False)
@@ -271,8 +265,6 @@ def model_trace(runs):
     hidden = np.flatnonzero(~data['masks'][1])
     frames.add_patch(Rectangle((hidden[0], -.247), len(hidden), .093, facecolor='#F0D5DF',
                                edgecolor=MAGENTA, linewidth=.6, clip_on=False))
-    frames.text(hidden.mean() + .5, -.29, VIEWS[1], ha='center', va='top',
-                fontsize=7.25, color=MAGENTA, clip_on=False)
     panel(frames, 'b', y=top + .105)
     architecture_flow(architecture, visual, visible, audio, audible)
     return figure
@@ -304,9 +296,8 @@ def statement_predictions(axis, runs):
             for width, start, color in zip(prediction, np.r_[0., prediction.cumsum()[:-1]], CLASS_COLORS, strict=True):
                 axis.add_patch(Rectangle((left + frame_width * start, y - .047), frame_width * width, .047,
                                          facecolor=color, edgecolor='white', linewidth=.35, alpha=alpha))
-        before = 100 * anchor[column, label]
-        after = 100 * fused[column, label]
-        axis.text(center, frame_bottom - .173, f'{POLARITY[label]}  {before:.1f}% → {after:.1f}%',
+        before, after = anchor[column, label], fused[column, label]
+        axis.text(center, frame_bottom - .169, f'{before:.1%} → {after:.1%}',
                   fontsize=7.75, color=CLASS_COLORS[label], fontweight='bold', ha='center', va='top')
     axis.text(.025, frame_bottom - .060, 'Anchor', fontsize=7., ha='right', va='center')
     axis.text(.025, frame_bottom - .128, 'Fusion', fontsize=7., ha='right', va='center')
@@ -338,17 +329,14 @@ def coupling_evidence(runs):
     colorbar = figure.colorbar(confidence, cax=key, ticks=[-35, 0, 35])
     colorbar.ax.tick_params(length=2, pad=1.6, labelsize=7.25)
     colorbar.outline.set_visible(False)
-    fits.text(1., 1.060, r'RPS gain ($10^{-3}$)', transform=fits.transAxes,
-              ha='right', va='bottom', fontsize=7.35)
     class_names = ('negative', 'neutral', 'positive')
     values = 1000 * np.array([crema['contributions_by_polarity'][p] for p in class_names])
     for j, (color, offset) in enumerate(((MAGENTA, .20), (INDIGO, -.20))):
         for row, value in zip((2, 1, 0), values[:, j], strict=True):
             components.barh(row + offset, value, height=.205, color=color, zorder=2)
-            label_position = max(value, 1.7) if value >= 0 else value
-            components.annotate(f'{value:.1f}'.replace('-', '−'), (label_position, row + offset),
-                                xytext=(2.5 if value >= 0 else -2.5, 0), textcoords='offset points',
-                                color=INK, ha='left' if value >= 0 else 'right', va='center', fontsize=6.8)
+            position = max(value, 1.7) + .8 if value >= 0 else value - .8
+            components.text(position, row + offset, f'{value:.1f}'.replace('-', '−'),
+                            ha='left' if value >= 0 else 'right', va='center', fontsize=6.8)
     forest_axis(components, POLARITY, r'RPS component gain ($10^{-3}$)', limits=(-18, 53))
     components.grid(False, axis='y')
     components.legend(handles=[Patch(color=MAGENTA, label='Signed'), Patch(color=INDIGO, label='Neutral')],
@@ -367,13 +355,34 @@ def coupling_evidence(runs):
     return figure
 
 
-def within_polarity_evidence(runs):
+def within_polarity_examples(runs):
+    archived = runs / 'within_polarity_examples.npz'
+    if archived.is_file():
+        with np.load(archived, allow_pickle=False) as observed:
+            return observed['clip_numbers'], observed['ratings'], observed['updates']
     with np.load(runs / 'conditional_intensity_evidence.npz', allow_pickle=False) as data:
         ids, videos, labels, scores = (data[f'ch_sims_v2__{key}']
                                       for key in ('ids', 'groups', 'y', 'sentiment'))
         genuine, permuted = (data[f'ch_sims_v2__conditional_{arm}_signed_shift']
                              for arm in ('shared', 'shuffled'))
 
+    mean_updates = 2 * np.stack((genuine, permuted)).mean(axis=(1, 2))
+    samples = []
+    for polarity in (0, 2):
+        candidates = []
+        for video in np.unique(videos):
+            subset = np.flatnonzero((videos == video) & (labels == polarity))
+            if len(subset) == 8 and len(np.unique(scores[subset])) >= 3:
+                candidates.append((round(float(np.ptp(scores[subset])), 4), video, subset))
+        candidates.sort(key=lambda candidate: candidate[:2])
+        _, _, sample = candidates[len(candidates) // 2]
+        samples.append(sample[np.lexsort((ids[sample], scores[sample]))])
+    clips = np.array([[int(ids[index].rsplit('$_$', 1)[-1]) for index in subset] for subset in samples])
+    return clips, scores[np.asarray(samples)], np.stack([mean_updates[:, subset] for subset in samples])
+
+
+def within_polarity_evidence(runs):
+    clips, ratings, updates = within_polarity_examples(runs)
     figure = plt.figure(figsize=(6.70, 2.08))
     grid = figure.add_gridspec(1, 3, left=.027, right=.973, bottom=.37, top=.835,
                               wspace=.065, width_ratios=(1., .31, 1.))
@@ -386,40 +395,27 @@ def within_polarity_evidence(runs):
     figure.text(.5, .255, 'Clip number within video', ha='center', va='center', fontsize=8)
     colorbar_axis = figure.add_axes([.335, .144, .33, .050])
     position = np.arange(8)
-    mean_updates = 2 * np.stack((genuine, permuted)).mean(axis=(1, 2))
-    samples = []
-    for polarity in (0, 2):
-        candidates = []
-        for video in np.unique(videos):
-            subset = np.flatnonzero((videos == video) & (labels == polarity))
-            if len(subset) == 8 and len(np.unique(scores[subset])) >= 3:
-                candidates.append((round(float(np.ptp(scores[subset])), 4), video, subset))
-        candidates.sort(key=lambda candidate: candidate[:2])
-        _, _, sample = candidates[len(candidates) // 2]
-        samples.append(sample[np.lexsort((ids[sample], scores[sample]))])
-    scale = np.ceil(2 * np.max(np.abs(mean_updates[:, np.concatenate(samples)]))) / 2
-    for column, (axis, subset) in enumerate(zip(cases, samples, strict=True)):
-        values = np.vstack((np.full(8, np.nan), mean_updates[:, subset]))
+    scale = np.ceil(2 * np.max(np.abs(updates))) / 2
+    for column, axis in enumerate(cases):
+        values = np.vstack((np.full(8, np.nan), updates[column]))
         image = axis.imshow(values, cmap=CHANGE.with_extremes(bad=GRID), vmin=-scale, vmax=scale,
                             interpolation='nearest', aspect='auto')
         panel(axis, 'ab'[column], y=1.12)
-        axis.text(.10, 1.12, POLARITY[(0, 2)[column]], transform=axis.transAxes,
-                  va='bottom', fontsize=8, color=INK)
-        axis.set_xticks(position, [str(int(ids[index].rsplit('$_$', 1)[-1])) for index in subset])
+        axis.set_xticks(position, [str(clip) for clip in clips[column]])
         axis.set_yticks([])
         axis.tick_params(axis='both', length=0)
         axis.vlines(np.arange(.5, 7.5), -.5, 2.5, color='white', linewidth=.85)
         axis.hlines([.5, 1.5], -.5, 7.5, color='white', linewidth=.95)
         axis.spines[['left', 'bottom']].set_visible(False)
         if column == 1:
-            example, = [slot for slot, index in enumerate(subset) if int(ids[index].rsplit('$_$', 1)[-1]) == 14]
+            example, = np.flatnonzero(clips[column] == 14)
             axis.add_patch(Rectangle((example - .48, .52), .96, 1.96, facecolor='none',
                                      edgecolor=INDIGO, linewidth=1.0, zorder=3))
-        for slot, value in enumerate(scores[subset]):
+        for slot, value in enumerate(ratings[column]):
             axis.text(slot, 0, f'{value:.1f}'.replace('-', '−'), ha='center', va='center',
                       color=INK, fontsize=7.0)
-        for row, updates in enumerate(mean_updates[:, subset], start=1):
-            for slot, update in enumerate(updates):
+        for row, series in enumerate(updates[column], start=1):
+            for slot, update in enumerate(series):
                 rgb = image.cmap(image.norm(update))[:3]
                 brightness = np.dot(rgb, (.2126, .7152, .0722))
                 value = f'{round(float(update), 2) + 0.0:.2f}'.replace('-', '−')
@@ -446,10 +442,6 @@ def plot_gap_locations(figure, grid, runs):
         frames = figure.add_subplot(inputs[0, case])
         top = filmstrip(frames, data['frames'][case], data['frame_slots'])
         panel(frames, 'ab'[case], y=top + .109)
-        frames.text(.090, top + .109, f'Rated {POLARITY[data["y"][case]].lower()}',
-                    transform=frames.transAxes, va='bottom', fontsize=8, color=INK)
-        frames.text(1., top + .109, f'Audience {data["sentiment"][case]:.2f}'.replace('-', '−'),
-                    transform=frames.transAxes, ha='right', va='bottom', fontsize=7.4, color=SLATE)
         feature = figure.add_subplot(inputs[1, case])
         values = normalized_channels(data['visual'][case].T)
         feature_strip(feature, values, data['masks'][0, case], 2., height=.75)
@@ -510,9 +502,7 @@ def robustness_evidence(runs):
     return figure
 
 
-def plot_gain_transitions(axis, changes):
-    no_gain = changes <= 0
-    counts = np.bincount(2 * no_gain[0] + no_gain[1], minlength=4).reshape(2, 2)
+def plot_gain_transitions(axis, counts):
     margins = (counts.sum(1), counts.sum(0))
     axis.set(xlim=(0, 1), ylim=(0, 1))
     axis.set_axis_off()
@@ -569,10 +559,8 @@ def transfer_evidence(runs):
         overall.hlines(row, prior, shared, color=SLATE, linewidth=1.05)
         overall.vlines(prior, row - .105, row + .105, color=SLATE, linewidth=1.15)
         overall.vlines(shared, row - .105, row + .105, color=TEAL, linewidth=1.85)
-        overall.annotate(f'{prior:.3f}', (prior, row), xytext=(-3, 0), textcoords='offset points',
-                         color=SLATE, ha='right', va='center', fontsize=7.)
-        overall.annotate(f'{shared:.3f}', (shared, row), xytext=(3, 0), textcoords='offset points',
-                         color=TEAL, ha='left', va='center', fontsize=7.)
+        overall.text(prior - .0015, row, f'{prior:.3f}', color=SLATE, ha='right', va='center', fontsize=7.)
+        overall.text(shared + .0015, row, f'{shared:.3f}', color=TEAL, ha='left', va='center', fontsize=7.)
     overall.set_yticks([2, 1, 0], ['MOUD', 'MELD', 'MSP-Face'])
     overall.set_ylim(-.46, 2.46)
     overall.set_xlim(.198, .321)
@@ -590,33 +578,36 @@ def transfer_evidence(runs):
         target.plot(position, mean, color=color, linestyle=style, linewidth=1.25, zorder=2)
         target.errorbar(position, mean, yerr=[mean - low, high - mean], fmt='none', ecolor=color,
                         capsize=2.7, capthick=.88, elinewidth=.88, alpha=.88, zorder=3)
-        if compare == 'primary':
-            offsets = [(-4, 0, 'right', 'center'), (-14, 3, 'right', 'bottom')]
-        else:
-            offsets = [(14, -3, 'left', 'top'), (5, -5, 'left', 'top')]
-        for x, value, (dx, dy, horizontal, vertical) in zip(position, mean, offsets, strict=True):
-            target.annotate(f'{value:.1f}'.replace('-', '−'), (x, value),
-                            xytext=(dx, dy), textcoords='offset points', color=color,
-                            fontsize=6.9, ha=horizontal, va=vertical)
+        offset_x, alignment, offset_y = (-.043, 'right', 1.15) if compare == 'primary' else (.06, 'left', -1.15)
+        for x, value in zip(position, mean, strict=True):
+            target.text(x + offset_x, value + offset_y, f'{value:.1f}'.replace('-', '−'),
+                        color=color, ha=alignment, va='center', fontsize=6.9)
     target.set_xticks([0, 1], ['Frozen', 'Refitted'])
     target.set_xlim(-.25, 1.25)
     target.set_ylabel(r'RPS reduction ($10^{-3}$)', labelpad=2)
     target.yaxis.set_major_locator(MaxNLocator(5))
     panel(overall, 'a', y=1.075)
     panel(target, 'b', y=1.075)
-    with (np.load(runs / 'msp_face_transfer_matched_evidence.npz', allow_pickle=False) as frozen_cases,
-          np.load(runs / 'msp_face_refit_evidence.npz', allow_pickle=False) as refitted_cases):
-        for key in ('ids', 'seeds', 'y', 'sentiment', 'masks'):
-            np.testing.assert_array_equal(frozen_cases[key], refitted_cases[key])
-        y = frozen_cases['y']
-        changes = np.array([
-            (supporting.ranked_probability_score(table['anchor'][:, 1:3], y)
-             - supporting.ranked_probability_score(table['intensity'][:, 1:3], y)).mean((0, 1))
-            for table in (frozen_cases, refitted_cases)
-        ])
-    means = changes.mean(1)
-    np.testing.assert_allclose(means, [x['secondary']['anchor']['reduction'] for x in (frozen, refit)],
-                               atol=1e-7)
+    if 'clip_gain_transitions' in refit:
+        counts = np.asarray(refit['clip_gain_transitions'])
+        if counts.shape != (2, 2) or np.any(counts < 0) or counts.sum() != refit['n_clips']:
+            raise ValueError('Invalid counts for the matched MSP-Face clips.')
+    else:
+        from msp_face_effects import clip_gain_transitions
+
+        with (np.load(runs / 'msp_face_transfer_matched_evidence.npz', allow_pickle=False) as frozen_cases,
+              np.load(runs / 'msp_face_refit_evidence.npz', allow_pickle=False) as refitted_cases):
+            for key in ('ids', 'seeds', 'y', 'sentiment', 'masks'):
+                np.testing.assert_array_equal(frozen_cases[key], refitted_cases[key])
+            y = frozen_cases['y']
+            changes = [
+                (supporting.ranked_probability_score(table['anchor'][:, 1:3], y)
+                 - supporting.ranked_probability_score(table['intensity'][:, 1:3], y)).mean((0, 1))
+                for table in (frozen_cases, refitted_cases)
+            ]
+        np.testing.assert_allclose(np.mean(changes, axis=1),
+                                   [x['secondary']['anchor']['reduction'] for x in (frozen, refit)], atol=1e-7)
+        counts = clip_gain_transitions(*changes)
     for axis, entries in ((overall, [(SLATE, '-', 'Text anchor'), (TEAL, '-', 'Shared')]),
                           (target, [(TEAL, '-', 'vs. independent'), (INDIGO, '--', 'vs. anchor')])):
         handles = [Line2D([], [], color=color, ls=style, label=label) for color, style, label in entries]
@@ -628,7 +619,7 @@ def transfer_evidence(runs):
     upper_bounds = upper.transformed(figure.transFigure.inverted())
     position = switching.get_position()
     switching.set_position(Bbox.from_extents(upper_bounds.x0, position.y0, upper_bounds.x1, position.y1))
-    plot_gain_transitions(switching, changes)
+    plot_gain_transitions(switching, counts)
     flow = Bbox.union([artist.get_window_extent(renderer) for artist in (*switching.texts, *switching.patches)])
     shift = (flow.x0 + flow.x1 - upper.x0 - upper.x1) / (2 * switching.bbox.width)
     switching.set_xlim(shift, 1 + shift)
@@ -643,18 +634,13 @@ def plot_audiovisual_example(runs, output):
     layout = figure.add_gridspec(2, 2, left=.164, right=.966, top=.78, bottom=.19,
                                  height_ratios=(1., 1.85), hspace=.43, wspace=.21)
     figure.text(.164, .939, f'“{clip["transcript_en"].item()}”', fontsize=8.4, va='top', color=INK)
-    rating = f'{float(clip["target"]):.2f}'.replace('-', '−')
-    figure.text(.966, .939, f'Audience rating {rating}', fontsize=7.6, va='top', ha='right', color=SLATE)
-
-    polarity = int(clip['polarity'])
+    rated = int(clip['polarity'])
     inputs = ('audio', 'vision')
     forecasts = ('anchor', 'text_audio', 'text_vision', 'fused')
     labels = ('Text anchor', 'Text + audio', 'Text + vision', 'Text + audio + vision')
-    for column, view, width in ((0, 1, 35), (1, 2, 65)):
+    for column, view in enumerate((1, 2)):
         features = figure.add_subplot(layout[0, column])
         predictions = figure.add_subplot(layout[1, column])
-        features.text(.5, 1.13, f'{width}% gap', transform=features.transAxes,
-                      fontsize=8.3, fontweight='medium', ha='center', va='bottom')
         panel(features, 'ab'[column], y=1.13)
         for row, name, mask in zip((1, 0), inputs, clip['masks'][view], strict=True):
             feature_strip(features, normalized_channels(clip[name]), mask, row, height=.73)
@@ -673,8 +659,8 @@ def plot_audiovisual_example(runs, output):
             left = np.r_[0., estimate.cumsum()[:-1]]
             predictions.barh(row, estimate, left=left, height=.61, color=CLASS_COLORS,
                              alpha=alpha, edgecolor='none')
-            value = estimate[polarity]
-            predictions.text(left[polarity] + value / 2, row, f'{value:.1%}',
+            value = estimate[rated]
+            predictions.text(left[rated] + value / 2, row, f'{value:.1%}',
                              color='white' if name == 'fused' else INK,
                              ha='center', va='center', fontsize=7.3)
             if name != 'anchor':

@@ -160,22 +160,16 @@ def export(fig, output, *, align_panels=False):
     names = dict(zip('abcdef', part.letters)) if part else {}
     align = align_panels or part is not None
     labels = []
-    contexts = {'CH-SIMS v2', 'OMG-Emotion', 'RAVDESS', 'CREMA-D', 'MOUD', 'MELD', 'MSP-Face',
-                'MELD, frozen', 'MOUD, frozen'}
     for axis in fig.axes:
         for location in ('left', 'center', 'right'):
             title = axis.get_title(loc=location).strip()
             if title:
-                first, *rest = title.split(maxsplit=1)
+                first = title.split(maxsplit=1)[0]
                 letter = first if len(first) == 1 and first in 'abcdefg' else ''
                 label = names.get(letter, letter)
                 original = axis.set_title(label, loc=location, fontsize=9, fontweight='bold')
                 if letter:
                     labels.append((label, original))
-                    if (align and rest and rest[0] in contexts
-                            and not any(item.get_text().strip() == rest[0] for item in axis.texts)):
-                        axis.text(.5, 1.029, rest[0], transform=axis.transAxes, ha='center',
-                                  va='bottom', fontsize=7.8)
         if align:
             for artist in list(axis.texts):
                 letter = artist.get_text().strip()
@@ -480,10 +474,8 @@ def plot_fixed_transcripts(root, output):
         axis.vlines(slot, low, high, color=color, linewidth=1.35, zorder=3)
         axis.plot(slot, mean, color=color, marker='D', markersize=4.15, linestyle='none', zorder=4)
 
-    for axis, letter, heading in ((visual, 'a', 'Vision vs. text anchor'),
-                                   (objective, 'b', 'Sharing vs. matched heads')):
+    for axis, letter in ((visual, 'a'), (objective, 'b')):
         axis.set_title(letter, loc='left', fontweight='bold', pad=8)
-        axis.text(.5, 1.085, heading, transform=axis.transAxes, ha='center', va='bottom', fontsize=8.1)
         axis.axhline(0, color=SLATE, linewidth=.65, zorder=1)
         axis.axvline(len(ranks) + 1.4, color=GRID, linewidth=.8, zorder=1)
         axis.set_xlim(.3, summary + 1.35)
@@ -492,7 +484,7 @@ def plot_fixed_transcripts(root, output):
         axis.yaxis.set_major_locator(MaxNLocator(5))
         axis.tick_params(axis='both', labelsize=6.9)
     visual.set_ylabel(r'Balanced RPS reduction ($10^{-3}$)')
-    objective.legend(loc='lower center', bbox_to_anchor=(.5, 1.26), ncol=2,
+    objective.legend(loc='lower center', bbox_to_anchor=(.5, 1.06), ncol=2,
                      frameon=False, fontsize=7, handlelength=1, handletextpad=.3, columnspacing=.9)
     export(fig, output)
 
@@ -697,8 +689,6 @@ def plot_published_cohorts(root, output, *, include_raw=True):
         axis.axvline(0, color='black', linewidth=.75, linestyle=(0, (3, 3)), zorder=1)
         axis.spines['left'].set_visible(False)
         axis.set_title(f'{letter}  {corpus}', loc='left', fontweight='bold', pad=7)
-        if not include_raw:
-            axis.text(.15, 1.04, corpus, transform=axis.transAxes, va='bottom', fontsize=8)
         axis.set_ylim(-.52, 2.52)
         axis.tick_params(axis='y', length=0, pad=5)
         axis.xaxis.set_major_locator(MaxNLocator(5))
@@ -813,6 +803,20 @@ def plot_reference_distillation(root, output, alignment_script, layout_report):
     export(figure, output)
 
 
+def cremad_probability_changes(root):
+    archived = root / 'cremad_probability_changes.npz'
+    if archived.is_file():
+        with np.load(archived, allow_pickle=False) as observed:
+            return observed['changes'], observed['counts']
+    with np.load(root / 'cremad_evidence.npz', allow_pickle=False) as packet:
+        shared, independent, labels = (packet[key] for key in ('intensity', 'independent_intensity', 'y'))
+    rps_gain = (ranked_probability_score(independent, labels)
+                - ranked_probability_score(shared, labels)).mean((0, 1))
+    order = np.lexsort((rps_gain, labels))
+    changes = (shared - independent).mean((0, 1)).T
+    return changes[:, order], np.bincount(labels, minlength=3)
+
+
 def plot_cremad(root, output, alignment_script, layout_report):
     configure_figure()
     report = json.loads((root / 'cremad_effects.json').read_text(encoding='utf-8'))
@@ -824,16 +828,10 @@ def plot_cremad(root, output, alignment_script, layout_report):
                               height_ratios=(1.30, 1.), hspace=.64, wspace=.40)
     clips = figure.add_subplot(grid[0, :])
     effects, per_class = figure.add_subplot(grid[1, 0]), figure.add_subplot(grid[1, 1])
-    with np.load(root / 'cremad_evidence.npz', allow_pickle=False) as packet:
-        shared, independent, labels = (packet[key] for key in ('intensity', 'independent_intensity', 'y'))
-    rps_gain = (ranked_probability_score(independent, labels)
-                - ranked_probability_score(shared, labels)).mean((0, 1))
-    order = np.lexsort((rps_gain, labels))
-    counts = np.bincount(labels, minlength=3)
+    changes, counts = cremad_probability_changes(root)
     edges = np.r_[0, counts.cumsum()]
     names = ('Negative', 'Neutral', 'Positive')
-    changes = (shared - independent).mean((0, 1)).T
-    image = clips.imshow(changes[:, order], extent=(0, len(labels), 2.5, -.5), cmap=EFFECTS,
+    image = clips.imshow(changes, extent=(0, counts.sum(), 2.5, -.5), cmap=EFFECTS,
                          vmin=-.15, vmax=.15, aspect='auto', interpolation='none')
     clips.vlines(edges[1:-1], -.5, 2.5, color='white', linewidth=1.05)
     clips.set_xticks(edges[:-1] + counts / 2, [f'{name}\n{count:,} clips' for name, count in zip(names, counts)])
@@ -1153,8 +1151,6 @@ def plot_gap_location(root, output, alignment_script, layout_report):
         axis.add_patch(Rectangle((-.5, saved - .5), len(bins), 1., facecolor='none',
                                  edgecolor=INDIGO, linewidth=1.0, clip_on=False, zorder=3))
         axis.set_title('ab'[column], loc='left', fontweight='bold', pad=6)
-        axis.text(.5, 1.045, f'{width:.0%} visual gap', transform=axis.transAxes,
-                  ha='center', va='bottom', fontsize=8)
         axis.set_xticks([0, 5, 11, 17, 23], [1, 6, 12, 18, 24])
         ticks = np.unique([0, len(starts) // 2, len(starts) - 1])
         axis.set_yticks(ticks, starts[ticks] + 1)

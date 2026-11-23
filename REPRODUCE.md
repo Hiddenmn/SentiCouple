@@ -1,41 +1,39 @@
 # Reproduce SentiCouple results
 
-## Reproduce the results
+The companion archive contains the inputs used to draw the manuscript figures, the run configurations and the aggregate results. Use this repository for the training and analysis scripts.
 
-Use this repository for the source code. For the archived results, extract the manuscript companion archive and work from `research/av_evidence` inside it. The `runs/` packets, fitted weights and manuscript sources used below are included in the companion archive. Use Python 3.12 and the packages in `requirements.txt`. The experiments used PyTorch 2.11.0 with CUDA 12.8 on an NVIDIA GeForce RTX 5070. Install the matching CUDA build with the following commands.
+## Recreate the figures
+
+Work from `research/av_evidence` after extracting the archive. Use Python 3.12 and the packages in `requirements.txt`. The experiments used PyTorch 2.11.0 with CUDA 12.8 on an NVIDIA GeForce RTX 5070. Install the matching CUDA build with the following commands.
 
 ```sh
 python -m pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cu128
 python -m pip install -r requirements.txt
 ```
 
-The commands below use the paired predictions and estimates from the companion archive. Figure generation also uses pdfLaTeX and Poppler's `pdftoppm` to assemble the supplementary panels.
+The commands use the plotted values and result summaries in `runs/`. Figure generation also uses pdfLaTeX and Poppler's `pdftoppm` to assemble the supplementary panels. The separate LaTeX source archive contains both documents and their vector figures.
 
 ```sh
-python primary_comparisons.py --runs runs
-python conditional_intensity_effects.py --evidence runs/conditional_intensity_evidence.npz --output conditional_intensity_effects.json
-python msp_face_effects.py --evidence runs/msp_face_refit_evidence.npz --frozen-evidence runs/msp_face_transfer_matched_evidence.npz --output msp_face_refit_paired.json
 python paper_figures.py --runs runs --output reproduced_figures
 python paper_figures.py --runs runs --output reproduced_figures --supplement
-python manuscript/build_kbs.py --output built_paper
 ```
 
-`runs/` identifies the corpora and comparisons in the manuscript. The prediction arrays pair models over the same clips, widths and seeds. The CH-SIMS v2 within-polarity figure reads the original ratings and the fitted signed updates from `runs/conditional_intensity_evidence.npz`. The example updates average the 35% and 65% visual gap views. Paired concordance gives half credit to tied updates. The archived benchmark JSON files report the forecast metrics and give the corresponding inference times under `timing`.
+The benchmark JSON files contain the forecast metrics and inference times used in Tables 4 and 5. `runs/conditional_intensity_effects.json` summarizes the ordering and score-calibration comparisons. `runs/within_polarity_examples.npz` gives the 16 clips plotted in the main paper, with updates averaged across the 35% and 65% visual gaps. The MSP-Face transition counts in `runs/msp_face_refit_paired.json` summarize which forecasts improved after visual fusion before and after refitting.
 
 ## Recreate inputs and train models
 
-The input and target definitions are in Sections 3 and 4 of the main text. `prepare_*.py` reads the source releases and `encode_*.py` extracts features where needed. Use `train.py` for the anchor and the coupled or independent heads, and `benchmark.py` for the matched reference cores. Each command documents its inputs with `--help`. The saved splits and evidence identify the groups used for each estimate. In particular, `splits/mosei_eval_videos.txt` gives the CMU-MOSEI videos retained for evaluation.
+The input and target definitions are in Sections 3 and 4 of the main text. Obtain annotations and features from the original providers below. `prepare_*.py` reads the source releases and `encode_*.py` extracts features where needed. Use `train.py` for the anchor and the coupled or independent heads, and `benchmark.py` for the matched reference cores. Each command documents its inputs with `--help`. The recorded `run.json` files give the fit settings. `splits/mosei_eval_videos.txt` identifies the CMU-MOSEI evaluation videos.
 
 - [CH-SIMS, CMU-MOSI and CMU-MOSEI features](https://github.com/thuiar/MMSA#2-datasets) and [CH-SIMS v2](https://thuiar.github.io/sims.github.io/chsims).
 - [OMG-Emotion annotations](https://github.com/knowledgetechnologyuhh/OMGEmotionChallenge) and [MSP-Face annotations and source links](https://github.com/Lab-MSP/MSP_Face/tree/18fc6d717aab5a5731ad6bd59495ead3f1d80916).
 - [RAVDESS strength ratings](https://doi.org/10.1371/journal.pone.0196391), [RAVDESS facial tracks](https://zenodo.org/records/3255102), and [CREMA-D media and audience ratings](https://github.com/CheyneyComputerScience/CREMA-D/tree/1658cd342dff90010aa843eaeebd53610a08b1dc).
 - [MOUD video reviews](https://web.eecs.umich.edu/~mihalcea/downloads.html#MOUD) and [MELD dialogue](https://affective-meld.github.io/).
 
-The source corpora retain their original access conditions. CREMA-D frame excerpts retain the [database contents license](https://opendatacommons.org/licenses/dbcl/1-0/). The CREMA-D release provides the original videos for the named clips.
+Use the published access conditions for each corpus. The OMG-Emotion release supplies the utterance annotations used by `prepare_omg.py`. The MSP-Face release supplies the source links, segments, labels and official partitions used by `prepare_msp_face.py`. CREMA-D is published under the [Open Database License](https://opendatacommons.org/licenses/odbl/1-0/), and the frame excerpts retain the [database contents license](https://opendatacommons.org/licenses/dbcl/1-0/).
 
 ## Matched text-and-vision forecasts
 
-The archived predictions give the four within-corpus comparisons in Table 4.
+After refitting the models to produce their paired forecasts, run these commands for the four within-corpus comparisons in Table 4. Put the fitted run folders under `runs/` or pass their location with `--reference-runs` and `--matched-runs`.
 
 ```sh
 python mosei_results.py --cohort sims_v2 --output reproduced_sims_v2.json
@@ -64,9 +62,9 @@ python mosei_results.py --profile-upstream "$LNLN_DIR" "$API_DIR" "$UCMR_DIR" "$
   --output replayed_mosei_with_timing.json
 ```
 
-The first command uses the bundled same-seed SentiCouple forecasts to match clip IDs, ratings and masks. To refit those forecasts, use `train.py` with `--split official --eval-groups splits/mosei_eval_videos.txt --backbone attention --inputs visual --skip-reference-analysis --stream-text --selection rps --arms fusion intensity independent_intensity` for seeds 97, 17 and 521. Save each run as `mosei_fresh_visual_seed<seed>` under a new run directory.
+The first command uses the same-seed SentiCouple forecasts to match clip IDs, ratings and masks. Fit these first with `train.py --data data/mosei_aligned_50.pkl --split official --eval-groups splits/mosei_eval_videos.txt --backbone attention --inputs visual --skip-reference-analysis --stream-text --selection rps --arms fusion intensity independent_intensity` for seeds 97, 17 and 521. Save each run as `mosei_fresh_visual_seed<seed>`.
 
-Refit LNLN using `benchmark.py --model lnln --upstream <LNLN_DIR> --corpus mosei --head regression --split official --inputs visual --data data/mosei_aligned_50.pkl --eval-groups splits/mosei_eval_videos.txt --epochs 32 --patience 8 --batch 32 --lr 0.001 --weight-decay 0.01 --device cuda`. Pass the seed and its matching SentiCouple run through `--seed` and `--match-run`. Save each run as `mosei_lnln_regression_seed<seed>` alongside the SentiCouple fits. Point `--reference-runs` to that directory to use the refits in `benchmark_mosei.py` and `mosei_results.py`. The timing replay uses the bundled seed 97 weights and checks its forecasts against the saved probabilities and scores before timing.
+Refit LNLN using `benchmark.py --model lnln --upstream <LNLN_DIR> --corpus mosei --head regression --split official --inputs visual --data data/mosei_aligned_50.pkl --eval-groups splits/mosei_eval_videos.txt --epochs 32 --patience 8 --batch 32 --lr 0.001 --weight-decay 0.01 --device cuda`. Pass the seed and its matching SentiCouple run through `--seed` and `--match-run`. Save each run as `mosei_lnln_regression_seed<seed>` alongside the SentiCouple fits. Point `--reference-runs` to that directory to use the refits in `benchmark_mosei.py` and `mosei_results.py`. The timing replay uses the locally fitted seed 97 weights.
 
 ## Refit on CMU-MOSI
 
@@ -84,14 +82,9 @@ For each paired reference, run `benchmark.py` with the corresponding upstream ch
 
 ## Compare frozen forecasts on MSP-Face and MOUD
 
-The frozen transfer rows in Table 4 use the six OMG-Emotion models with their source preprocessing, weights and calibration. The bundled forecasts pair the ten source seeds across both visual gap widths. MSP-Face uses the refits' test clips and visual masks. MOUD uses polarity annotations and the translated transcripts.
+The frozen transfer rows in Table 4 use the six OMG-Emotion models with their source preprocessing, weights and calibration. Forecasts pair the ten source seeds across both gap widths. MSP-Face uses the refits' test clips and visual masks. MOUD uses polarity annotations and the translated transcripts.
 
-```sh
-python frozen_benchmark.py --evidence runs/msp_face_frozen_benchmark.npz --output reproduced_msp_face_frozen.json
-python frozen_benchmark.py --evidence runs/moud_frozen_benchmark.npz --output reproduced_moud_frozen.json
-```
-
-To regenerate the predictions, use `frozen_benchmark.py --cohort msp_face` or `--cohort moud` with all ten source fits, the OMG-Emotion features via `--source-data`, the prepared target features via `--target`, and the five pinned upstream checkouts via `--upstream`. For MSP-Face also supply the cohort manifest and the matching target refit using `--msp-manifest` and `--msp-match`. Use `--save-evidence` to retain the predictions alongside the estimates.
+Use `frozen_benchmark.py --cohort msp_face` or `--cohort moud` with all ten locally fitted source models, the OMG-Emotion features via `--source-data`, the prepared target features via `--target`, and the five pinned upstream checkouts via `--upstream`. For MSP-Face also supply the cohort file and the target refit using `--msp-manifest` and `--msp-match`. Use `--save-evidence` to write the predictions. To regenerate the transition counts, run `msp_face_effects.py --evidence` on the refitted packet and supply the same-mask frozen packet via `--frozen-evidence`.
 
 ## Refit API and UCMR-Net on CH-SIMS v2 and OMG-Emotion
 
@@ -108,7 +101,7 @@ For UCMR-Net, set `--model ucmr-net --lr 0.001 --weight-decay 0.0001`, use its p
 
 ## Reproduce GPU latency
 
-Use the corresponding feature packet and the seed 97 checkpoints. Each invocation checks the saved probabilities and scores and times the same single-clip and 32-clip batches for every model. Replace `sims_v2` with `omg`, `mosei` or `mosi` for the other within-corpus comparisons.
+Use the corresponding feature packet and the locally fitted seed 97 checkpoints. Each invocation times the same single-clip and 32-clip batches for every model. Replace `sims_v2` with `omg`, `mosei` or `mosi` for the other within-corpus comparisons.
 
 ```sh
 python mosei_results.py --cohort sims_v2 --models tfr-net lnln rm-net api ucmr-net \
@@ -116,7 +109,7 @@ python mosei_results.py --cohort sims_v2 --models tfr-net lnln rm-net api ucmr-n
   --output replayed_sims_v2_with_timing.json
 ```
 
-For MSP-Face and MOUD, add `--profile` and the corresponding `--evidence` packet to the frozen inference command described above. The profiler uses the seed 97 OMG-Emotion weights and the target feature batches. For MOUD its batch set cycles through the 498 clips to reach the same number of batches.
+For MSP-Face and MOUD, add `--profile` to the frozen inference command or pass the locally generated packet via `--evidence`. The profiler uses the seed 97 OMG-Emotion weights and the target feature batches. For MOUD its batch set cycles through the 498 clips to reach the same number of batches.
 
 Tables 4 and 5 report the median forward time at each batch size. Supplementary Table S3 reports the corresponding interquartile intervals.
 
@@ -143,15 +136,15 @@ To refit UCMR-Net, use the pinned checkout and `benchmark.py --model ucmr-net --
 
 ## Recreate the media examples
 
-The CH-SIMS v2 modality figure uses the paired forecasts in `runs/sims_v2_shared_score_seed97` and `runs/sims_v2_streams_seed97`. To rebuild its feature strips and outputs from the original feature packet, run:
+After fitting `sims_v2_shared_score_seed97` and `sims_v2_streams_seed97` as specified in their `run.json` files, recreate the CH-SIMS v2 example from the paired forecasts and original feature packet.
 
 ```sh
 python audiovisual_example.py --run runs/sims_v2_shared_score_seed97 --streams-run runs/sims_v2_streams_seed97 --features CH_SIMS_V2_FEATURES --output runs/audiovisual_example.npz --english-transcript "How much longer do we have to stay in this lousy place?"
 ```
 
-The packet retains the original transcript and its displayed translation. Its acoustic and visual channels also supply the feature strips in the full architecture. The aggregate modality table uses the two CH-SIMS v2 ablation reports and the recorded forecasts at each gap width from seeds 97, 17, and 521.
+The example supplies the same acoustic and visual strips in the architecture and modality figures. The aggregate modality table uses the matched forecasts at both gap widths from seeds 97, 17 and 521.
 
-To rebuild the video examples, use the CREMA-D checkout at the revision linked above and the 24-bin feature packet from `prepare_cremad.py`. Pass their local paths in place of `RELEASE_DIR` and `CREMAD_FEATURES`.
+To rebuild the video examples, use the CREMA-D checkout linked above, the 24-bin feature packet and the locally fitted CREMA-D checkpoints. Pass the dataset locations in place of `RELEASE_DIR` and `CREMAD_FEATURES`.
 
 ```sh
 python figure_example.py --run runs/cremad_heads_seed97 --features CREMAD_FEATURES --release RELEASE_DIR --output paper_example.npz
