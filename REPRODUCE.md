@@ -18,7 +18,7 @@ python paper_figures.py --runs runs --output reproduced_figures
 python paper_figures.py --runs runs --output reproduced_figures --supplement
 ```
 
-The benchmark JSON files contain the forecast metrics and inference times used in Tables 4 and 5. Recompute the primary crossed fit-and-media intervals for the CH-SIMS v2 text-and-vision and three-stream comparisons and for RAVDESS from the grouped loss sums.
+The benchmark JSON files contain the forecast metrics and inference times used in Tables 4 and 5. Recompute the crossed fit-and-media intervals for the CH-SIMS v2 text-and-vision and three-stream comparisons and for RAVDESS from the grouped loss sums.
 
 ```sh
 python primary_comparisons.py --grouped runs/primary_grouped_rps.json
@@ -201,6 +201,21 @@ The audio replication uses the same three seeds and held-out videos as the text-
 ```sh
 python mosei_stream_results.py --runs refits --output reproduced_mosei_streams.json
 ```
+
+## Repeat the CH-SIMS v2 three-stream head comparison
+
+Table 2 includes ten paired fits on the original 85 test videos. The modality ablations and the UCMR-Net comparison use their three common seeds, 97, 17 and 521. Use the script below to fit the matched class-only, shared and independent heads from the original feature packets.
+
+```sh
+for seed in 97 17 521 31 59 113 251 359 701 997; do
+  python train.py --data data/ch_sims_v2_unaligned.pkl --split new-videos \
+    --group-reference data/ch_sims_unaligned_39.pkl --backbone temporal \
+    --selection rps --device cuda --seed "$seed" \
+    --arms fusion intensity independent_intensity --output "refits/sims_v2_shared_score_seed${seed}"
+done
+```
+
+The grouped RPS command above also recovers the ten-fit mean, the gain across the seven additional fits, the native-view gain, and the change in gain from native to gapped views.
 
 ## Three-stream comparison with UCMR-Net
 
